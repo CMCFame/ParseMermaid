@@ -1,0 +1,4 @@
+python3-opencv
+tesseract-ocr
+libgl1-mesa-glx
+poppler-utils
