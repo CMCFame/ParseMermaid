@@ -2,7 +2,7 @@ from typing import Dict, List, Optional, Any
 import re
 from parse_mermaid import Node, Edge, NodeType
 
-# Mapeo más extenso de frases comunes a prompts de audio
+# Extended mapping of common phrases to audio prompts
 AUDIO_PROMPTS = {
     "Invalid entry. Please try again": "callflow:1009",
     "Goodbye message": "callflow:1029",
@@ -47,7 +47,7 @@ class IVRTransformer:
 
     def transform(self, graph: Dict) -> List[Dict[str, Any]]:
         """
-        Transforma el grafo parseado en una lista de nodos IVR.
+        Transforms the parsed graph into a list of IVR nodes.
         """
         nodes_dict = graph['nodes']
         edges = graph['edges']
@@ -56,17 +56,17 @@ class IVRTransformer:
 
         ivr_nodes = []
         
-        # Agregar nodo inicial si es necesario
+        # Add initial node if needed
         if not any(n.raw_text.lower().startswith('start') for n in nodes_dict.values()):
             ivr_nodes.append(self.standard_nodes["start"])
 
-        # Procesar cada nodo
+        # Process each node
         for node_id, node in nodes_dict.items():
             ivr_node = self._transform_node(node, edges, styles)
             if ivr_node:
                 ivr_nodes.append(ivr_node)
 
-        # Agregar nodos estándar si no existen
+        # Add standard nodes if they don't exist
         if not any(n["label"] == "Problems" for n in ivr_nodes):
             ivr_nodes.append(self.standard_nodes["problems"])
         if not any(n["label"] == "Goodbye" for n in ivr_nodes):
@@ -76,37 +76,37 @@ class IVRTransformer:
 
     def _transform_node(self, node: Node, edges: List[Edge], styles: Dict) -> Optional[Dict]:
         """
-        Transforma un nodo individual al formato IVR.
+        Transforms an individual node to IVR format.
         """
         node_id = node.id
         raw_text = node.raw_text
         node_type = node.node_type
         
-        # Construir nodo base
+        # Build base node
         ivr_node = {
             "label": self._to_title_case(node_id),
             "log": raw_text
         }
 
-        # Aplicar estilos
+        # Apply styles
         for style_class in node.style_classes:
             if style_class in styles:
                 self._apply_style(ivr_node, styles[style_class])
 
-        # Manejar nodos de decisión (rhombus)
+        # Handle decision nodes (rhombus)
         if node_type == NodeType.RHOMBUS:
             self._handle_decision_node(ivr_node, node, edges)
         else:
             self._handle_action_node(ivr_node, node, edges)
 
-        # Agregar comandos especiales basados en el texto o tipo
+        # Add special commands based on text or type
         self._add_special_commands(ivr_node, raw_text)
 
         return ivr_node
 
     def _handle_decision_node(self, ivr_node: Dict, node: Node, edges: List[Edge]):
         """
-        Configura un nodo de decisión con getDigits y branch.
+        Sets up a decision node with getDigits and branch.
         """
         out_edges = [e for e in edges if e.from_id == node.id]
         
@@ -124,7 +124,7 @@ class IVRTransformer:
 
         for edge in out_edges:
             if edge.label:
-                # Detectar patrones en las etiquetas
+                # Detect patterns in labels
                 digit_match = re.match(r'^(\d+)\s*-\s*(.*)', edge.label)
                 if digit_match:
                     digit, action = digit_match.groups()
@@ -142,26 +142,26 @@ class IVRTransformer:
 
     def _handle_action_node(self, ivr_node: Dict, node: Node, edges: List[Edge]):
         """
-        Configura un nodo de acción con playPrompt y otros comandos.
+        Sets up an action node with playPrompt and other commands.
         """
         out_edges = [e for e in edges if e.from_id == node.id]
         
-        # Buscar prompt de audio conocido o usar TTS
+        # Look for known audio prompt or use TTS
         audio_prompt = self._find_audio_prompt(node.raw_text)
         if audio_prompt:
             ivr_node["playPrompt"] = [audio_prompt]
         else:
             ivr_node["playPrompt"] = [f"tts:{node.raw_text}"]
 
-        # Si hay una única salida, agregar goto
+        # If there's a single output, add goto
         if len(out_edges) == 1:
             ivr_node["goto"] = self._to_title_case(out_edges[0].to_id)
 
     def _add_special_commands(self, ivr_node: Dict, raw_text: str):
         """
-        Agrega comandos especiales basados en el texto del nodo.
+        Adds special commands based on node text.
         """
-        # Detectar comandos gosub basados en el texto
+        # Detect gosub commands based on text
         text_lower = raw_text.lower()
         
         for key, (code, name) in self.result_codes.items():
@@ -169,11 +169,11 @@ class IVRTransformer:
                 ivr_node["gosub"] = ["SaveCallResult", code, name]
                 break
 
-        # Agregar nobarge para ciertos tipos de mensajes
+        # Add nobarge for certain message types
         if any(keyword in text_lower for keyword in ["goodbye", "recorded", "message", "please"]):
             ivr_node["nobarge"] = "1"
 
-        # Detectar transferencias
+        # Detect transfers
         if "transfer" in text_lower:
             ivr_node.update({
                 "setvar": {"transfer_ringback": "callflow:2223"},
@@ -183,13 +183,13 @@ class IVRTransformer:
 
     def _find_audio_prompt(self, text: str) -> Optional[str]:
         """
-        Busca un prompt de audio que coincida con el texto.
+        Searches for a matching audio prompt.
         """
-        # Primero buscar coincidencia exacta
+        # Try exact match first
         if text in AUDIO_PROMPTS:
             return AUDIO_PROMPTS[text]
 
-        # Luego buscar coincidencia parcial
+        # Then try partial match
         text_lower = text.lower()
         for key, prompt in AUDIO_PROMPTS.items():
             if key.lower() in text_lower:
@@ -200,27 +200,27 @@ class IVRTransformer:
     @staticmethod
     def _apply_style(ivr_node: Dict, style: str):
         """
-        Aplica estilos Mermaid al nodo IVR.
+        Applies Mermaid styles to IVR node.
         """
         style_parts = style.split(',')
         for part in style_parts:
             if 'fill' in part:
-                # Los estilos de relleno podrían mapear a diferentes comportamientos
+                # Fill styles could map to different behaviors
                 pass
             if 'stroke' in part:
-                # Los estilos de borde podrían mapear a diferentes comportamientos
+                # Border styles could map to different behaviors
                 pass
 
     @staticmethod
     def _to_title_case(s: str) -> str:
         """
-        Convierte strings como 'node_id' a 'Node Id'.
+        Converts strings like 'node_id' to 'Node Id'.
         """
         return ' '.join(word.capitalize() for word in s.replace('_', ' ').split())
 
 def graph_to_ivr(graph: Dict) -> List[Dict[str, Any]]:
     """
-    Función wrapper para mantener compatibilidad con código existente.
+    Wrapper function to maintain compatibility with existing code.
     """
     transformer = IVRTransformer()
     return transformer.transform(graph)

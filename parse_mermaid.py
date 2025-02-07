@@ -38,7 +38,7 @@ class Subgraph:
 
 class MermaidParser:
     def __init__(self):
-        # Compilar expresiones regulares para mejor rendimiento
+        # Compile regex patterns for better performance
         self.node_patterns = {
             NodeType.NORMAL: re.compile(r'^(\w+)\s*\["([^"]+)"\]'),
             NodeType.ROUND: re.compile(r'^(\w+)\s*\("([^"]+)"\)'),
@@ -71,7 +71,7 @@ class MermaidParser:
 
     def parse(self, mermaid_text: str) -> Dict:
         """
-        Parsea un diagrama Mermaid y retorna una estructura de datos completa.
+        Parses a Mermaid diagram and returns a complete data structure.
         """
         lines = mermaid_text.split('\n')
         
@@ -86,11 +86,11 @@ class MermaidParser:
         for line in lines:
             line = line.strip()
             
-            # Saltar líneas vacías y comentarios
+            # Skip empty lines and comments
             if not line or line.startswith('%%'):
                 continue
                 
-            # Procesar definición de subgráfico
+            # Process subgraph definition
             subgraph_match = self.subgraph_pattern.match(line)
             if subgraph_match:
                 sg_id = subgraph_match.group(1)
@@ -104,19 +104,19 @@ class MermaidParser:
                 current_subgraph = sg_id
                 continue
                 
-            # Procesar fin de subgráfico
+            # Process subgraph end
             if self.end_pattern.match(line):
                 current_subgraph = None
                 continue
                 
-            # Procesar definición de clase
+            # Process class definition
             class_def_match = self.class_def_pattern.match(line)
             if class_def_match:
                 class_name = class_def_match.group(1)
                 styles[class_name] = class_def_match.group(2)
                 continue
                 
-            # Procesar asignación de clase
+            # Process class assignment
             class_match = self.class_pattern.match(line)
             if class_match:
                 node_id = class_match.group(1)
@@ -126,7 +126,7 @@ class MermaidParser:
                 node_classes[node_id].append(class_name)
                 continue
 
-            # Procesar nodos
+            # Process nodes
             node_found = False
             for node_type, pattern in self.node_patterns.items():
                 match = pattern.match(line)
@@ -145,7 +145,7 @@ class MermaidParser:
             if node_found:
                 continue
 
-            # Procesar bordes
+            # Process edges
             edge_match = self.edge_pattern.match(line)
             if edge_match:
                 from_id = edge_match.group(1)
@@ -170,7 +170,7 @@ class MermaidParser:
 
 def parse_mermaid(mermaid_text: str) -> Dict:
     """
-    Función wrapper para mantener compatibilidad con el código existente.
+    Wrapper function to maintain compatibility with existing code.
     """
     parser = MermaidParser()
     return parser.parse(mermaid_text)

@@ -9,14 +9,14 @@ import os
 from parse_mermaid import parse_mermaid, MermaidParser
 from graph_to_ivr import graph_to_ivr, IVRTransformer
 
-# Configuración de la página
+# Page configuration
 st.set_page_config(
     page_title="Mermaid-to-IVR Converter",
     page_icon="🔄",
     layout="wide"
 )
 
-# Constantes y ejemplos
+# Constants and examples
 DEFAULT_MERMAID = '''flowchart TD
     start["Start of call"]
     available["Are you available?\nIf yes press 1, if no press 3"]
@@ -35,15 +35,15 @@ DEFAULT_MERMAID = '''flowchart TD
     accept --> done
     decline --> done'''
 
-# Funciones auxiliares
+# Helper functions
 def save_temp_file(content: str, suffix: str = '.js') -> str:
-    """Guarda contenido en un archivo temporal y retorna la ruta."""
+    """Saves content to a temporary file and returns the path."""
     with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as f:
         f.write(content)
         return f.name
 
 def load_example_flows() -> Dict[str, str]:
-    """Carga flujos de ejemplo predefinidos."""
+    """Loads predefined example flows."""
     return {
         "Simple Callout": DEFAULT_MERMAID,
         "PIN Change": '''flowchart TD
@@ -76,91 +76,91 @@ def load_example_flows() -> Dict[str, str]:
     }
 
 def validate_mermaid(mermaid_text: str) -> Optional[str]:
-    """Valida el diagrama Mermaid y retorna mensaje de error si existe."""
+    """Validates the Mermaid diagram and returns error message if any."""
     try:
         parser = MermaidParser()
         parser.parse(mermaid_text)
         return None
     except Exception as e:
-        return f"Error validando diagrama: {str(e)}"
+        return f"Error validating diagram: {str(e)}"
 
 def format_ivr_code(ivr_nodes: list) -> str:
-    """Formatea el código IVR con estilo consistente."""
+    """Formats IVR code with consistent styling."""
     return "module.exports = " + json.dumps(ivr_nodes, indent=2) + ";"
 
 def show_code_diff(original: str, converted: str):
-    """Muestra una comparación del código original y convertido."""
+    """Shows a comparison of original and converted code."""
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("Mermaid Original")
+        st.subheader("Original Mermaid")
         st.code(original, language="javascript")
     with col2:
-        st.subheader("Código IVR Generado")
+        st.subheader("Generated IVR Code")
         st.code(converted, language="javascript")
 
 def main():
-    # Título y descripción
+    # Title and description
     st.title("🔄 Mermaid-to-IVR Converter")
     st.markdown("""
-    Esta herramienta convierte diagramas Mermaid en código JavaScript para sistemas IVR.
-    Soporta múltiples tipos de nodos, subgráficos y estilos.
+    This tool converts Mermaid diagrams into JavaScript code for IVR systems.
+    Supports multiple node types, subgraphs, and styles.
     """)
 
-    # Sidebar con opciones
+    # Sidebar with options
     with st.sidebar:
-        st.header("⚙️ Opciones")
+        st.header("⚙️ Options")
         
-        # Cargar ejemplo
+        # Load example
         example_flows = load_example_flows()
         selected_example = st.selectbox(
-            "Cargar ejemplo",
-            ["Personalizado"] + list(example_flows.keys())
+            "Load example",
+            ["Custom"] + list(example_flows.keys())
         )
         
-        # Opciones de exportación
-        st.subheader("Exportar")
+        # Export options
+        st.subheader("Export")
         export_format = st.radio(
-            "Formato de exportación",
+            "Export format",
             ["JavaScript", "JSON", "YAML"]
         )
         
-        # Opciones avanzadas
-        st.subheader("Opciones Avanzadas")
-        add_standard_nodes = st.checkbox("Agregar nodos estándar", value=True)
-        validate_diagram = st.checkbox("Validar diagrama", value=True)
+        # Advanced options
+        st.subheader("Advanced Options")
+        add_standard_nodes = st.checkbox("Add standard nodes", value=True)
+        validate_diagram = st.checkbox("Validate diagram", value=True)
 
-    # Área principal
+    # Main area
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        # Editor de Mermaid
-        st.subheader("📝 Editor Mermaid")
-        if selected_example != "Personalizado":
+        # Mermaid editor
+        st.subheader("📝 Mermaid Editor")
+        if selected_example != "Custom":
             mermaid_text = st.text_area(
-                "Diagrama Mermaid",
+                "Mermaid Diagram",
                 example_flows[selected_example],
                 height=400
             )
         else:
             mermaid_text = st.text_area(
-                "Diagrama Mermaid",
+                "Mermaid Diagram",
                 DEFAULT_MERMAID,
                 height=400
             )
 
     with col2:
-        # Vista previa del diagrama actualizada
-        st.subheader("👁️ Vista Previa")
+        # Diagram preview
+        st.subheader("👁️ Preview")
         if mermaid_text:
             try:
                 st_mermaid.st_mermaid(mermaid_text)
             except Exception as e:
-                st.error(f"Error en la vista previa: {str(e)}")
+                st.error(f"Preview error: {str(e)}")
 
-    # Botón de conversión
-    if st.button("🔄 Convertir a Código IVR"):
-        with st.spinner("Convirtiendo..."):
-            # Validación opcional
+    # Convert button
+    if st.button("🔄 Convert to IVR Code"):
+        with st.spinner("Converting..."):
+            # Optional validation
             if validate_diagram:
                 error = validate_mermaid(mermaid_text)
                 if error:
@@ -168,11 +168,11 @@ def main():
                     return
 
             try:
-                # Parsear y convertir
+                # Parse and convert
                 graph = parse_mermaid(mermaid_text)
                 ivr_nodes = graph_to_ivr(graph)
                 
-                # Formatear según el formato seleccionado
+                # Format according to selected format
                 if export_format == "JavaScript":
                     output = format_ivr_code(ivr_nodes)
                 elif export_format == "JSON":
@@ -180,26 +180,26 @@ def main():
                 else:  # YAML
                     output = yaml.dump(ivr_nodes, allow_unicode=True)
 
-                # Mostrar resultado
-                st.subheader("📤 Código Generado")
+                # Show result
+                st.subheader("📤 Generated Code")
                 st.code(output, language="javascript")
                 
-                # Opciones de descarga
+                # Download options
                 tmp_file = save_temp_file(output)
                 with open(tmp_file, 'rb') as f:
                     st.download_button(
-                        label="⬇️ Descargar Código",
+                        label="⬇️ Download Code",
                         data=f,
                         file_name=f"ivr_flow.{export_format.lower()}",
                         mime="text/plain"
                     )
                 os.unlink(tmp_file)
 
-                # Mostrar diferencias
+                # Show differences
                 show_code_diff(mermaid_text, output)
 
             except Exception as e:
-                st.error(f"Error en la conversión: {str(e)}")
+                st.error(f"Conversion error: {str(e)}")
                 st.exception(e)
 
 if __name__ == "__main__":
