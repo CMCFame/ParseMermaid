@@ -24,7 +24,7 @@ class FlowchartConverter:
         base64_image = self.pdf_to_image(file_path) if is_pdf else self.encode_image(file_path)
 
         response = self.client.chat.completions.create(
-            model="gpt-4-vision-preview",
+            model="gpt-4o",
             messages=[
                 {
                     "role": "system",
