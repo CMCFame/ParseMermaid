@@ -38,12 +38,10 @@ def main():
         if uploaded_file and api_key:
             with st.spinner("Processing diagram..."):
                 try:
-                    # Save uploaded file temporarily
                     with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp:
                         tmp.write(uploaded_file.getvalue())
                         temp_path = tmp.name
 
-                    # Process with OpenAI
                     mermaid_text = process_flow_diagram(temp_path, api_key)
                     os.unlink(temp_path)
                     st.success("Diagram processed successfully!")
