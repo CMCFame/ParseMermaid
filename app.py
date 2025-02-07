@@ -5,46 +5,23 @@ import yaml
 from typing import Optional, Dict, Any
 import tempfile
 import os
-from PIL import Image
 
+from openai_converter import process_flow_diagram
 from parse_mermaid import parse_mermaid, MermaidParser
-from graph_to_ivr import graph_to_ivr, IVRTransformer
-from flow_detector import process_flow_diagram
+from graph_to_ivr import graph_to_ivr
 
-# Page configuration
 st.set_page_config(
     page_title="Mermaid-to-IVR Converter",
     page_icon="🔄",
     layout="wide"
 )
 
-def process_uploaded_file(uploaded_file) -> Optional[str]:
-    """Process uploaded PDF or image file."""
-    if uploaded_file is None:
-        return None
-        
-    # Save uploaded file temporarily
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp:
-        tmp.write(uploaded_file.getvalue())
-        temp_path = tmp.name
-    
-    try:
-        # Process the file and get Mermaid diagram
-        mermaid_code = process_flow_diagram(temp_path)
-        os.unlink(temp_path)
-        return mermaid_code
-    except Exception as e:
-        os.unlink(temp_path)
-        raise e
-
 def main():
     st.title("🔄 Mermaid-to-IVR Converter")
-    st.markdown("""
-    This tool converts flow diagrams into IVR code through Mermaid diagrams.
-    You can either upload a diagram image/PDF or write Mermaid code directly.
-    """)
+    st.markdown("Convert flow diagrams into IVR code through Mermaid diagrams.")
 
-    # Input method selection
+    api_key = st.sidebar.text_input("OpenAI API Key", type="password")
+    
     input_method = st.radio(
         "Select input method",
         ["Upload Diagram", "Write Mermaid Code"]
@@ -53,23 +30,29 @@ def main():
     mermaid_text = None
 
     if input_method == "Upload Diagram":
-        st.subheader("📎 Upload Flow Diagram")
         uploaded_file = st.file_uploader(
             "Upload a PDF or image file",
             type=["pdf", "png", "jpg", "jpeg"]
         )
 
-        if uploaded_file:
+        if uploaded_file and api_key:
             with st.spinner("Processing diagram..."):
                 try:
-                    mermaid_text = process_uploaded_file(uploaded_file)
-                    if mermaid_text:
-                        st.success("Diagram processed successfully!")
+                    # Save uploaded file temporarily
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp:
+                        tmp.write(uploaded_file.getvalue())
+                        temp_path = tmp.name
+
+                    # Process with OpenAI
+                    mermaid_text = process_flow_diagram(temp_path, api_key)
+                    os.unlink(temp_path)
+                    st.success("Diagram processed successfully!")
                 except Exception as e:
                     st.error(f"Error processing file: {str(e)}")
                     return
+        elif uploaded_file:
+            st.warning("Please enter your OpenAI API key in the sidebar.")
 
-    # Rest of the UI (Mermaid editor, preview, etc.)
     col1, col2 = st.columns([2, 1])
     
     with col1:
@@ -95,20 +78,16 @@ def main():
             except Exception as e:
                 st.error(f"Preview error: {str(e)}")
 
-    # Convert button
     if mermaid_text and st.button("🔄 Convert to IVR Code"):
         with st.spinner("Converting..."):
             try:
-                # Parse and convert
                 graph = parse_mermaid(mermaid_text)
                 ivr_nodes = graph_to_ivr(graph)
-                
-                # Show result
-                st.subheader("📤 Generated IVR Code")
                 output = "module.exports = " + json.dumps(ivr_nodes, indent=2) + ";"
+                
+                st.subheader("📤 Generated IVR Code")
                 st.code(output, language="javascript")
                 
-                # Download option
                 tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.js')
                 with open(tmp_file.name, 'w') as f:
                     f.write(output)
