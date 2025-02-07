@@ -21,34 +21,44 @@ class Edge:
 
 class MermaidParser:
     def __init__(self):
-        # Regular expressions for parsing
-        self.node_regex = re.compile(r'^\s*(\w+)((?:\["|{"|"\(|\(\().*(?:\]"|"}"|"\)|\)\)))')
-        self.edge_regex = re.compile(r'^\s*(\w+)\s*--?>(?:\|"([^"]*)")?\|\s*(\w+)')
-        self.text_extract_regex = re.compile(r'(?:\["|\{"|\(\()(.*?)(?:"\]|"}|"\)|"\)\))')
+        # Updated regex patterns to handle multi-line content
+        self.node_regex = re.compile(r'^\s*(\w+)\s*(\["|{"|"\(|\(\()(.*?)("\]|"}"|"\)|"\))"?\s*$', re.DOTALL)
+        self.edge_regex = re.compile(r'^\s*(\w+)\s*--?>(?:\|"([^"]*)"\|)?\s*(\w+)')
 
     def parse(self, mermaid_text: str) -> Dict:
         """Parse Mermaid flowchart text into a structured format."""
-        lines = mermaid_text.strip().split('\n')
+        # Preprocess to handle multiline nodes
+        lines = []
+        current_line = []
+        
+        for line in mermaid_text.strip().split('\n'):
+            line = line.strip()
+            if not line or line.startswith('flowchart'):
+                continue
+                
+            # Count quotes to determine if node definition is complete
+            quotes = line.count('"')
+            current_line.append(line)
+            
+            if quotes % 2 == 0:  # Complete node or edge definition
+                lines.append(' '.join(current_line))
+                current_line = []
+
         nodes = {}
         edges = []
 
+        # Process lines
         for line in lines:
-            if line.strip().startswith('flowchart'):
-                continue
-
             # Try to match node definition
             node_match = self.node_regex.match(line)
             if node_match:
-                node_id, node_def = node_match.groups()
-                text_match = self.text_extract_regex.search(node_def)
-                if text_match:
-                    raw_text = text_match.group(1)
-                    node_type = self._determine_node_type(node_def)
-                    nodes[node_id] = {
-                        'id': node_id,
-                        'raw_text': raw_text,
-                        'node_type': node_type
-                    }
+                node_id, start_delim, text, end_delim = node_match.groups()
+                node_type = self._determine_node_type(start_delim)
+                nodes[node_id] = {
+                    'id': node_id,
+                    'raw_text': text.replace('\\n', '\n').strip(),
+                    'node_type': node_type
+                }
                 continue
 
             # Try to match edge definition
@@ -66,13 +76,17 @@ class MermaidParser:
             'edges': edges
         }
 
-    def _determine_node_type(self, node_def: str) -> str:
-        """Determine the type of node based on its definition."""
-        if '{"' in node_def:
+    def _determine_node_type(self, delimiter: str) -> str:
+        """Determine the type of node based on its delimiter."""
+        if '{' in delimiter:
             return 'decision'
-        elif '((' in node_def:
+        elif '(' in delimiter:
             return 'end'
         return 'normal'
+
+    def _clean_text(self, text: str) -> str:
+        """Clean node text content."""
+        return text.replace('\\n', '\n').strip()
 
 def parse_mermaid(mermaid_text: str) -> Dict:
     """Wrapper function to maintain compatibility with existing code."""
