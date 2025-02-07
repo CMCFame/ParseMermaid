@@ -1,43 +1,22 @@
 # graph_to_ivr.py
+
 import re
 
+# A small dictionary mapping certain known lines to specific callflow prompts
 AUDIO_PROMPTS = {
     "Invalid entry. Please try again": "callflow:1009",
     "Goodbye message": "callflow:1029",
+    # add more as needed
 }
 
-def graph_to_ivr(parsed):
-    """
-    Takes the complex structure from parse_mermaid()
-    and returns a single array of IVR nodes.
-    We'll flatten subgraphs so the final code doesn't break.
-    """
-    # Flatten all subgraphs into single list of nodes & edges
-    all_nodes = {}
-    all_edges = []
-
-    def visit_subgraph(sg):
-        # sg has "nodes", "edges", "subgraphs"
-        for nid, nd in sg["nodes"].items():
-            all_nodes[nid] = nd
-        for e in sg["edges"]:
-            all_edges.append(e)
-        for sub in sg.get("subgraphs", []):
-            visit_subgraph(sub)
-
-    visit_subgraph(parsed)  # merges everything into all_nodes, all_edges
-
-    # Now we convert all_nodes + all_edges into an IVR array
-    # We'll build a small adjacency for each node:
-    adjacency = {}
-    for e in all_edges:
-        from_id = e["from"]
-        to_id = e["to"]
-        adjacency.setdefault(from_id, []).append(e)
+def graph_to_ivr(graph):
+    nodes_dict = graph['nodes']
+    edges = graph['edges']
 
     ivr_nodes = []
 
-    # Insert standard "Start"
+    # 1) Insert a standard "Start" node
+    #    Adjust to your liking if you only want it in certain flows
     ivr_nodes.append({
         "label": "Start",
         "maxLoop": ["Main", 3, "Problems"],
@@ -45,33 +24,32 @@ def graph_to_ivr(parsed):
         "log": "Entry point to the call flow"
     })
 
-    visited = set()
+    def out_edges(node_id):
+        return [e for e in edges if e['from'] == node_id]
 
-    def is_decision(node_id):
-        # If out edges have patterns like "1 - accept"
-        out_e = adjacency.get(node_id, [])
-        for edge in out_e:
-            lbl = edge.get("label", "") or ""
-            if re.match(r'^\d+\s*-\s*', lbl):
+    # Decide if a node is "decision-like" by seeing if it has edges with digit-based labels
+    def is_decision_node(node_id):
+        for e in out_edges(node_id):
+            label = e.get('label') or ''
+            if re.match(r'^\d+\s*-\s*', label):
                 return True
         return False
 
-    # We'll build a node object for each. If we see the node text in AUDIO_PROMPTS, we use that.
-    for nid, nd in all_nodes.items():
-        node_label = nd["id"]
-        shape = nd.get("shape", "")
-        text = nd.get("text", node_label)  # fallback
-        edges_out = adjacency.get(nid, [])
+    for node_id, node_data in nodes_dict.items():
+        node_label = to_title_case(node_id)
+        raw_text = node_data['raw_text']
 
-        node_obj = {
-            "label": to_title_case(node_label),
-            "log": f"Shape={shape} rawText={text}",  # store shape & text for debugging
+        # Build a minimal node object
+        ivr_node = {
+            "label": node_label,
+            "log": raw_text,  # store the raw text in "log" so devs see what it was
         }
 
-        # Decide if it's a "decision" node
-        if is_decision(nid):
-            # Build getDigits
-            node_obj["getDigits"] = {
+        o_edges = out_edges(node_id)
+
+        if is_decision_node(node_id):
+            # This node expects digits
+            ivr_node["getDigits"] = {
                 "numDigits": 1,
                 "maxTries": 3,
                 "maxTime": 7,
@@ -81,54 +59,65 @@ def graph_to_ivr(parsed):
             }
             branch_map = {}
             digit_choices = []
-            for oe in edges_out:
-                lbl = (oe.get("label") or "").strip()
-                match = re.match(r'^(\d+)\s*-\s*(.*)', lbl)
+            for oe in o_edges:
+                edge_label = (oe.get('label') or '').strip()
+                # parse patterns like "1 - accept"
+                match = re.match(r'^(\d+)\s*-\s*(.*)', edge_label)
                 if match:
                     digit = match.group(1)
-                    rest = match.group(2)
-                    branch_map[digit] = to_title_case(oe["to"])
+                    target_label = to_title_case(oe['to'])
+                    branch_map[digit] = target_label
                     digit_choices.append(digit)
-                elif re.search(r'invalid|no input', lbl, re.IGNORECASE):
-                    branch_map["error"] = to_title_case(oe["to"])
-                    branch_map["none"] = to_title_case(oe["to"])
+                elif re.search(r'invalid|no input', edge_label, re.IGNORECASE):
+                    # interpret that as error/none
+                    branch_map["error"] = to_title_case(oe['to'])
+                    branch_map["none"] = to_title_case(oe['to'])
                 else:
                     # fallback
-                    arrow_type = oe.get("arrow")
-                    # we can store something else if we want
-                    branch_map[lbl or arrow_type] = to_title_case(oe["to"])
+                    # maybe store branch_map[edge_label] = ...
+                    branch_map[edge_label] = to_title_case(oe['to'])
+
+            ivr_node["branch"] = branch_map
             if digit_choices:
-                node_obj["getDigits"]["validChoices"] = "|".join(digit_choices)
-            node_obj["branch"] = branch_map
+                ivr_node["getDigits"]["validChoices"] = "|".join(digit_choices)
 
+            # If there's only one outgoing edge, you might do a default goto
+            if len(o_edges) == 1:
+                ivr_node["goto"] = to_title_case(o_edges[0]['to'])
         else:
-            # Not a decision node => prompt node
-            # If text is in AUDIO_PROMPTS, we do that. Otherwise TTS
-            audio_code = AUDIO_PROMPTS.get(text)
-            if audio_code:
-                node_obj["playPrompt"] = [audio_code]
+            # Regular node
+            # We'll attempt to map text -> audio prompt
+            # If not found in our dictionary, fallback to TTS
+            audio_prompt = AUDIO_PROMPTS.get(raw_text, None)
+            if audio_prompt:
+                ivr_node["playPrompt"] = [audio_prompt]
             else:
-                node_obj["playPrompt"] = [f"tts:{text}"]
+                ivr_node["playPrompt"] = [f"tts:{raw_text}"]
+            
+            # If there's exactly one edge, let's goto
+            if len(o_edges) == 1:
+                ivr_node["goto"] = to_title_case(o_edges[0]['to'])
 
-            # If exactly 1 out edge, do goto
-            if len(edges_out) == 1:
-                node_obj["goto"] = to_title_case(edges_out[0]["to"])
+        # 2) If the label is something like "Accept", add a gosub
+        #    Adjust these to your flow’s naming
+        if node_label.lower() == "accept":
+            ivr_node["gosub"] = ["SaveCallResult", 1001, "Accept"]
+        elif node_label.lower() == "decline":
+            ivr_node["gosub"] = ["SaveCallResult", 1002, "Decline"]
+        elif node_label.lower() == "qualified no":
+            ivr_node["gosub"] = ["SaveCallResult", 1145, "QualNo"]
+        # etc. add more as needed
 
-        # If label is "Accept", "Decline", "Qualified No", etc. add gosub
-        lower_lbl = node_obj["label"].lower()
-        if lower_lbl == "accept":
-            node_obj["gosub"] = ["SaveCallResult", 1001, "Accept"]
-        elif lower_lbl == "decline":
-            node_obj["gosub"] = ["SaveCallResult", 1002, "Decline"]
+        ivr_nodes.append(ivr_node)
 
-        ivr_nodes.append(node_obj)
-
-    # add Problems + Goodbye
+    # 3) Add a standard "Problems" node
     ivr_nodes.append({
         "label": "Problems",
         "gosub": ["SaveCallResult", 1198, "Error Out"],
         "goto": "Goodbye"
     })
+
+    # 4) Add a standard "Goodbye" node
     ivr_nodes.append({
         "label": "Goodbye",
         "log": "Goodbye message",
@@ -140,4 +129,5 @@ def graph_to_ivr(parsed):
     return ivr_nodes
 
 def to_title_case(s):
+    """ Convert 'all_hands' => 'All Hands' etc. """
     return re.sub(r'\b\w', lambda m: m.group(0).upper(), s.replace('_', ' '))
