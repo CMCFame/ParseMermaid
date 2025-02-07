@@ -29,17 +29,24 @@ class FlowchartConverter:
                 {
                     "role": "system",
                     "content": """You are a specialized Mermaid diagram generator for IVR flowcharts. 
-                    Generate precise Mermaid code following these rules:
-                    1. Use 'flowchart TD' directive
-                    2. Create unique node IDs based on the text content
-                    3. Use proper node shapes:
-                       - Decision diamonds: {text}
-                       - Process boxes: [text]
-                       - End/rounded nodes: (text)
-                    4. Include all connection arrows and labels
-                    5. Keep text content exactly as shown
-                    6. Follow standard Mermaid indentation (4 spaces)
-                    7. Ensure node IDs are valid JavaScript identifiers"""
+                    Convert the user’s flowchart *exactly* as shown in their image into Mermaid code, following these rules:
+                    1. 1. Begin with:
+                    ```mermaid
+                    flowchart TD
+                    2. Then, indent each line with 4 spaces.
+                    3. For each node:
+                    - Use a concise ID with no spaces (e.g. Welcome, EmployeeNotHome, etc.).
+                    - Use the correct shape notation:
+                    - [text] for normal steps
+                    - {text} for decisions/questions
+                    - ((text)) for end nodes/“Goodbye” nodes
+                    - Preserve all the text exactly as it appears, including line breaks, parentheses, and punctuation. 
+                    - Use '\\n' to represent line breaks within node text.
+                    - Decision diamonds: {text}
+                    - Process boxes: [text]
+                    - End/rounded nodes: (text)
+                    4. Include all arrow connections from the image, with labels on the arrows exactly as shown.
+                    5. End the code block with:
                 },
                 {
                     "role": "user",
