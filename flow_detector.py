@@ -2,162 +2,166 @@ import cv2
 import numpy as np
 import pytesseract
 from pdf2image import convert_from_path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Set
 from dataclasses import dataclass
 from PIL import Image
 import os
+import re
 
 @dataclass
 class FlowElement:
-    type: str  # 'rectangle', 'diamond', 'circle'
+    type: str  # 'rectangle', 'diamond', 'circle', 'action'
     text: str
     coordinates: Tuple[int, int, int, int]
     id: str
+    connections: Set[str] = None  # IDs of connected elements
 
-@dataclass
-class Connection:
-    from_id: str
-    to_id: str
-    label: Optional[str] = None
+    def __post_init__(self):
+        if self.connections is None:
+            self.connections = set()
 
 class FlowDetector:
     def __init__(self):
-        self.min_contour_area = 1000
-        self.padding = 10
+        self.min_contour_area = 500  # Reduced to catch smaller elements
+        self.padding = 5
         self.next_id = 1
+        self.connection_threshold = 30  # Pixels distance for connection detection
 
     def process_file(self, file_path: str) -> str:
-        """Process PDF or image file and return Mermaid diagram."""
         if file_path.lower().endswith('.pdf'):
             images = convert_from_path(file_path)
-            image = np.array(images[0])  # Process first page for now
+            image = np.array(images[0])
         else:
             image = cv2.imread(file_path)
-        
         return self.process_image(image)
 
     def process_image(self, image: np.ndarray) -> str:
-        """Convert image to Mermaid diagram."""
         # Preprocessing
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(blurred, 50, 150)
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         
         # Find contours
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, hierarchy = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         
         # Detect elements
         elements = []
-        for contour in contours:
+        processed_areas = np.zeros_like(binary)
+        
+        for i, contour in enumerate(contours):
             if cv2.contourArea(contour) < self.min_contour_area:
+                continue
+                
+            # Check if area already processed
+            x, y, w, h = cv2.boundingRect(contour)
+            if np.any(processed_areas[y:y+h, x:x+w]):
                 continue
                 
             element = self._analyze_shape(contour, gray)
             if element:
                 elements.append(element)
+                # Mark area as processed
+                cv2.drawContours(processed_areas, [contour], -1, 255, -1)
+
+        # Detect arrows and connections
+        self._detect_connections(binary, elements)
         
-        # Detect connections
-        connections = self._detect_connections(edges, elements)
-        
-        # Generate Mermaid
-        return self._generate_mermaid(elements, connections)
+        # Generate Mermaid code
+        return self._generate_mermaid(elements)
 
     def _analyze_shape(self, contour, gray_image) -> Optional[FlowElement]:
-        """Analyze contour to determine shape and extract text."""
         approx = cv2.approxPolyDP(contour, 0.04 * cv2.arcLength(contour, True), True)
-        
-        # Get bounding box
         x, y, w, h = cv2.boundingRect(contour)
         
-        # Extract text using OCR
-        roi = gray_image[y-self.padding:y+h+self.padding, x-self.padding:x+w+self.padding]
-        text = pytesseract.image_to_string(roi).strip()
+        # Extract and clean text
+        roi = gray_image[max(0, y-self.padding):min(gray_image.shape[0], y+h+self.padding), 
+                        max(0, x-self.padding):min(gray_image.shape[1], x+w+self.padding)]
+        text = pytesseract.image_to_string(roi)
+        text = self._clean_text(text)
         
-        # Determine shape type
-        if len(approx) == 4:
-            # Check if rectangle or diamond
-            angles = self._get_angles(approx)
-            if all(abs(angle - 90) < 10 for angle in angles):
-                shape_type = 'rectangle'
-            else:
-                shape_type = 'diamond'
-        elif len(approx) > 8:
-            shape_type = 'circle'
-        else:
+        if not text:
             return None
             
+        # Determine shape type
+        if len(approx) == 4:
+            aspect_ratio = float(w)/h
+            if 0.95 <= aspect_ratio <= 1.05:  # Square-ish
+                shape_type = "decision"
+            else:
+                shape_type = "rectangle"
+        elif len(approx) > 6:
+            shape_type = "circle"
+        else:
+            shape_type = "action"  # Default type
+            
+        element_id = f"node{self.next_id}"
+        self.next_id += 1
+        
         return FlowElement(
             type=shape_type,
             text=text,
             coordinates=(x, y, w, h),
-            id=f"node{self.next_id}"
+            id=element_id
         )
 
-    def _detect_connections(self, edges: np.ndarray, elements: List[FlowElement]) -> List[Connection]:
-        """Detect connections between elements."""
-        connections = []
+    def _clean_text(self, text: str) -> str:
+        # Remove newlines and extra spaces
+        text = ' '.join(text.split())
+        # Remove special characters
+        text = re.sub(r'[^\w\s\-.,?]', '', text)
+        return text.strip()
+
+    def _detect_connections(self, binary_image: np.ndarray, elements: List[FlowElement]):
+        # Detect arrows using morphological operations
+        kernel = np.ones((3,3), np.uint8)
+        arrows = cv2.morphologyEx(binary_image, cv2.MORPH_OPEN, kernel)
         
-        # Use HoughLines to detect lines
-        lines = cv2.HoughLinesP(edges, 1, np.pi/180, 50, minLineLength=50, maxLineGap=10)
+        # Find arrow contours
+        arrow_contours, _ = cv2.findContours(arrows, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         
-        if lines is None:
-            return connections
-            
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
+        for arrow in arrow_contours:
+            if cv2.contourArea(arrow) < self.min_contour_area / 2:  # Arrows are usually smaller
+                continue
+                
+            # Get arrow endpoints
+            points = cv2.approxPolyDP(arrow, 0.1 * cv2.arcLength(arrow, True), True)
+            if len(points) < 2:
+                continue
+                
+            start_point = tuple(points[0][0])
+            end_point = tuple(points[-1][0])
             
             # Find connected elements
-            from_element = self._find_nearest_element((x1, y1), elements)
-            to_element = self._find_nearest_element((x2, y2), elements)
+            from_element = self._find_nearest_element(start_point, elements)
+            to_element = self._find_nearest_element(end_point, elements)
             
             if from_element and to_element and from_element != to_element:
-                connections.append(Connection(
-                    from_id=from_element.id,
-                    to_id=to_element.id
-                ))
-        
-        return connections
+                from_element.connections.add(to_element.id)
 
-    def _generate_mermaid(self, elements: List[FlowElement], connections: List[Connection]) -> str:
-        """Generate Mermaid diagram from detected elements and connections."""
-        mermaid = ["flowchart TD"]
+    def _generate_mermaid(self, elements: List[FlowElement]) -> str:
+        mermaid_lines = ["flowchart TD"]
         
-        # Add nodes
+        # Node definitions
         for element in elements:
-            if element.type == 'diamond':
-                mermaid.append(f'    {element.id}{{"{ element.text }"}}')
-            elif element.type == 'circle':
-                mermaid.append(f'    {element.id}(("{element.text}"))')
-            else:  # rectangle
-                mermaid.append(f'    {element.id}["{element.text}"]')
+            if element.type == "decision":
+                mermaid_lines.append(f'    {element.id}{{{{{element.text}}}}}')
+            elif element.type == "circle":
+                mermaid_lines.append(f'    {element.id}(({element.text}))')
+            else:
+                mermaid_lines.append(f'    {element.id}["{element.text}"]')
         
-        # Add connections
-        for conn in connections:
-            mermaid.append(f'    {conn.from_id} --> {conn.to_id}')
+        # Connection definitions
+        added_connections = set()
+        for element in elements:
+            for connected_id in element.connections:
+                connection = f"{element.id}-->{connected_id}"
+                if connection not in added_connections:
+                    mermaid_lines.append(f"    {connection}")
+                    added_connections.add(connection)
         
-        return '\n'.join(mermaid)
+        return '\n'.join(mermaid_lines)
 
-    @staticmethod
-    def _get_angles(points) -> List[float]:
-        """Calculate angles between connected points."""
-        angles = []
-        n = len(points)
-        for i in range(n):
-            p1 = points[i][0]
-            p2 = points[(i+1)%n][0]
-            p3 = points[(i+2)%n][0]
-            
-            angle = np.degrees(np.arctan2(p3[1]-p2[1], p3[0]-p2[0]) - 
-                             np.arctan2(p1[1]-p2[1], p1[0]-p2[0]))
-            angle = abs(angle)
-            if angle > 180:
-                angle = 360 - angle
-            angles.append(angle)
-        return angles
-
-    @staticmethod
-    def _find_nearest_element(point: Tuple[int, int], elements: List[FlowElement]) -> Optional[FlowElement]:
-        """Find the nearest element to a point."""
+    def _find_nearest_element(self, point: Tuple[int, int], 
+                            elements: List[FlowElement]) -> Optional[FlowElement]:
         min_dist = float('inf')
         nearest = None
         
@@ -166,13 +170,12 @@ class FlowDetector:
             center = (x + w/2, y + h/2)
             dist = np.sqrt((point[0]-center[0])**2 + (point[1]-center[1])**2)
             
-            if dist < min_dist:
+            if dist < min_dist and dist < self.connection_threshold:
                 min_dist = dist
                 nearest = element
         
         return nearest
 
 def process_flow_diagram(file_path: str) -> str:
-    """Main function to process flow diagrams."""
     detector = FlowDetector()
     return detector.process_file(file_path)
