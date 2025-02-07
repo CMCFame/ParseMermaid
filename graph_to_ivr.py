@@ -1,133 +1,226 @@
-# graph_to_ivr.py
-
+from typing import Dict, List, Optional, Any
 import re
+from parse_mermaid import Node, Edge, NodeType
 
-# A small dictionary mapping certain known lines to specific callflow prompts
+# Mapeo más extenso de frases comunes a prompts de audio
 AUDIO_PROMPTS = {
     "Invalid entry. Please try again": "callflow:1009",
     "Goodbye message": "callflow:1029",
-    # add more as needed
+    "Please enter your PIN": "callflow:1008",
+    "An accepted response has been recorded": "callflow:1167",
+    "Your response is being recorded as a decline": "callflow:1021",
+    "Please contact your local control center": "callflow:1705",
+    "To speak to a dispatcher": "callflow:1645",
+    "We were not able to complete the transfer": "callflow:1353",
 }
 
-def graph_to_ivr(graph):
-    nodes_dict = graph['nodes']
-    edges = graph['edges']
-
-    ivr_nodes = []
-
-    # 1) Insert a standard "Start" node
-    #    Adjust to your liking if you only want it in certain flows
-    ivr_nodes.append({
-        "label": "Start",
-        "maxLoop": ["Main", 3, "Problems"],
-        "nobarge": "1",
-        "log": "Entry point to the call flow"
-    })
-
-    def out_edges(node_id):
-        return [e for e in edges if e['from'] == node_id]
-
-    # Decide if a node is "decision-like" by seeing if it has edges with digit-based labels
-    def is_decision_node(node_id):
-        for e in out_edges(node_id):
-            label = e.get('label') or ''
-            if re.match(r'^\d+\s*-\s*', label):
-                return True
-        return False
-
-    for node_id, node_data in nodes_dict.items():
-        node_label = to_title_case(node_id)
-        raw_text = node_data['raw_text']
-
-        # Build a minimal node object
-        ivr_node = {
-            "label": node_label,
-            "log": raw_text,  # store the raw text in "log" so devs see what it was
+class IVRTransformer:
+    def __init__(self):
+        self.standard_nodes = {
+            "start": {
+                "label": "Start",
+                "maxLoop": ["Main", 3, "Problems"],
+                "nobarge": "1",
+                "log": "Entry point to call flow"
+            },
+            "problems": {
+                "label": "Problems",
+                "gosub": ["SaveCallResult", 1198, "Error Out"],
+                "goto": "Goodbye"
+            },
+            "goodbye": {
+                "label": "Goodbye",
+                "log": "Goodbye message",
+                "playPrompt": ["callflow:1029"],
+                "nobarge": "1",
+                "goto": "hangup"
+            }
+        }
+        
+        self.result_codes = {
+            "accept": (1001, "Accept"),
+            "decline": (1002, "Decline"),
+            "not_home": (1006, "Not Home"),
+            "qualified_no": (1145, "QualNo"),
+            "error": (1198, "Error Out")
         }
 
-        o_edges = out_edges(node_id)
+    def transform(self, graph: Dict) -> List[Dict[str, Any]]:
+        """
+        Transforma el grafo parseado en una lista de nodos IVR.
+        """
+        nodes_dict = graph['nodes']
+        edges = graph['edges']
+        styles = graph.get('styles', {})
+        subgraphs = graph.get('subgraphs', {})
 
-        if is_decision_node(node_id):
-            # This node expects digits
-            ivr_node["getDigits"] = {
-                "numDigits": 1,
-                "maxTries": 3,
-                "maxTime": 7,
-                "validChoices": "",
-                "errorPrompt": "callflow:1009",
-                "nonePrompt": "callflow:1009"
-            }
-            branch_map = {}
-            digit_choices = []
-            for oe in o_edges:
-                edge_label = (oe.get('label') or '').strip()
-                # parse patterns like "1 - accept"
-                match = re.match(r'^(\d+)\s*-\s*(.*)', edge_label)
-                if match:
-                    digit = match.group(1)
-                    target_label = to_title_case(oe['to'])
-                    branch_map[digit] = target_label
-                    digit_choices.append(digit)
-                elif re.search(r'invalid|no input', edge_label, re.IGNORECASE):
-                    # interpret that as error/none
-                    branch_map["error"] = to_title_case(oe['to'])
-                    branch_map["none"] = to_title_case(oe['to'])
-                else:
-                    # fallback
-                    # maybe store branch_map[edge_label] = ...
-                    branch_map[edge_label] = to_title_case(oe['to'])
+        ivr_nodes = []
+        
+        # Agregar nodo inicial si es necesario
+        if not any(n.raw_text.lower().startswith('start') for n in nodes_dict.values()):
+            ivr_nodes.append(self.standard_nodes["start"])
 
-            ivr_node["branch"] = branch_map
-            if digit_choices:
-                ivr_node["getDigits"]["validChoices"] = "|".join(digit_choices)
+        # Procesar cada nodo
+        for node_id, node in nodes_dict.items():
+            ivr_node = self._transform_node(node, edges, styles)
+            if ivr_node:
+                ivr_nodes.append(ivr_node)
 
-            # If there's only one outgoing edge, you might do a default goto
-            if len(o_edges) == 1:
-                ivr_node["goto"] = to_title_case(o_edges[0]['to'])
+        # Agregar nodos estándar si no existen
+        if not any(n["label"] == "Problems" for n in ivr_nodes):
+            ivr_nodes.append(self.standard_nodes["problems"])
+        if not any(n["label"] == "Goodbye" for n in ivr_nodes):
+            ivr_nodes.append(self.standard_nodes["goodbye"])
+
+        return ivr_nodes
+
+    def _transform_node(self, node: Node, edges: List[Edge], styles: Dict) -> Optional[Dict]:
+        """
+        Transforma un nodo individual al formato IVR.
+        """
+        node_id = node.id
+        raw_text = node.raw_text
+        node_type = node.node_type
+        
+        # Construir nodo base
+        ivr_node = {
+            "label": self._to_title_case(node_id),
+            "log": raw_text
+        }
+
+        # Aplicar estilos
+        for style_class in node.style_classes:
+            if style_class in styles:
+                self._apply_style(ivr_node, styles[style_class])
+
+        # Manejar nodos de decisión (rhombus)
+        if node_type == NodeType.RHOMBUS:
+            self._handle_decision_node(ivr_node, node, edges)
         else:
-            # Regular node
-            # We'll attempt to map text -> audio prompt
-            # If not found in our dictionary, fallback to TTS
-            audio_prompt = AUDIO_PROMPTS.get(raw_text, None)
-            if audio_prompt:
-                ivr_node["playPrompt"] = [audio_prompt]
-            else:
-                ivr_node["playPrompt"] = [f"tts:{raw_text}"]
-            
-            # If there's exactly one edge, let's goto
-            if len(o_edges) == 1:
-                ivr_node["goto"] = to_title_case(o_edges[0]['to'])
+            self._handle_action_node(ivr_node, node, edges)
 
-        # 2) If the label is something like "Accept", add a gosub
-        #    Adjust these to your flow’s naming
-        if node_label.lower() == "accept":
-            ivr_node["gosub"] = ["SaveCallResult", 1001, "Accept"]
-        elif node_label.lower() == "decline":
-            ivr_node["gosub"] = ["SaveCallResult", 1002, "Decline"]
-        elif node_label.lower() == "qualified no":
-            ivr_node["gosub"] = ["SaveCallResult", 1145, "QualNo"]
-        # etc. add more as needed
+        # Agregar comandos especiales basados en el texto o tipo
+        self._add_special_commands(ivr_node, raw_text)
 
-        ivr_nodes.append(ivr_node)
+        return ivr_node
 
-    # 3) Add a standard "Problems" node
-    ivr_nodes.append({
-        "label": "Problems",
-        "gosub": ["SaveCallResult", 1198, "Error Out"],
-        "goto": "Goodbye"
-    })
+    def _handle_decision_node(self, ivr_node: Dict, node: Node, edges: List[Edge]):
+        """
+        Configura un nodo de decisión con getDigits y branch.
+        """
+        out_edges = [e for e in edges if e.from_id == node.id]
+        
+        ivr_node["getDigits"] = {
+            "numDigits": 1,
+            "maxTries": 3,
+            "maxTime": 7,
+            "validChoices": "",
+            "errorPrompt": "callflow:1009",
+            "nonePrompt": "callflow:1009"
+        }
 
-    # 4) Add a standard "Goodbye" node
-    ivr_nodes.append({
-        "label": "Goodbye",
-        "log": "Goodbye message",
-        "playPrompt": ["callflow:1029"],
-        "nobarge": "1",
-        "goto": "hangup"
-    })
+        branch_map = {}
+        digit_choices = []
 
-    return ivr_nodes
+        for edge in out_edges:
+            if edge.label:
+                # Detectar patrones en las etiquetas
+                digit_match = re.match(r'^(\d+)\s*-\s*(.*)', edge.label)
+                if digit_match:
+                    digit, action = digit_match.groups()
+                    branch_map[digit] = self._to_title_case(edge.to_id)
+                    digit_choices.append(digit)
+                elif re.search(r'invalid|no input', edge.label, re.IGNORECASE):
+                    branch_map["error"] = self._to_title_case(edge.to_id)
+                    branch_map["none"] = self._to_title_case(edge.to_id)
+                else:
+                    branch_map[edge.label] = self._to_title_case(edge.to_id)
 
-def to_title_case(s):
-    """ Convert 'all_hands' => 'All Hands' etc. """
-    return re.sub(r'\b\w', lambda m: m.group(0).upper(), s.replace('_', ' '))
+        if digit_choices:
+            ivr_node["getDigits"]["validChoices"] = "|".join(digit_choices)
+        ivr_node["branch"] = branch_map
+
+    def _handle_action_node(self, ivr_node: Dict, node: Node, edges: List[Edge]):
+        """
+        Configura un nodo de acción con playPrompt y otros comandos.
+        """
+        out_edges = [e for e in edges if e.from_id == node.id]
+        
+        # Buscar prompt de audio conocido o usar TTS
+        audio_prompt = self._find_audio_prompt(node.raw_text)
+        if audio_prompt:
+            ivr_node["playPrompt"] = [audio_prompt]
+        else:
+            ivr_node["playPrompt"] = [f"tts:{node.raw_text}"]
+
+        # Si hay una única salida, agregar goto
+        if len(out_edges) == 1:
+            ivr_node["goto"] = self._to_title_case(out_edges[0].to_id)
+
+    def _add_special_commands(self, ivr_node: Dict, raw_text: str):
+        """
+        Agrega comandos especiales basados en el texto del nodo.
+        """
+        # Detectar comandos gosub basados en el texto
+        text_lower = raw_text.lower()
+        
+        for key, (code, name) in self.result_codes.items():
+            if key in text_lower:
+                ivr_node["gosub"] = ["SaveCallResult", code, name]
+                break
+
+        # Agregar nobarge para ciertos tipos de mensajes
+        if any(keyword in text_lower for keyword in ["goodbye", "recorded", "message", "please"]):
+            ivr_node["nobarge"] = "1"
+
+        # Detectar transferencias
+        if "transfer" in text_lower:
+            ivr_node.update({
+                "setvar": {"transfer_ringback": "callflow:2223"},
+                "include": "../../util/xfer.js",
+                "gosub": "XferCall"
+            })
+
+    def _find_audio_prompt(self, text: str) -> Optional[str]:
+        """
+        Busca un prompt de audio que coincida con el texto.
+        """
+        # Primero buscar coincidencia exacta
+        if text in AUDIO_PROMPTS:
+            return AUDIO_PROMPTS[text]
+
+        # Luego buscar coincidencia parcial
+        text_lower = text.lower()
+        for key, prompt in AUDIO_PROMPTS.items():
+            if key.lower() in text_lower:
+                return prompt
+
+        return None
+
+    @staticmethod
+    def _apply_style(ivr_node: Dict, style: str):
+        """
+        Aplica estilos Mermaid al nodo IVR.
+        """
+        style_parts = style.split(',')
+        for part in style_parts:
+            if 'fill' in part:
+                # Los estilos de relleno podrían mapear a diferentes comportamientos
+                pass
+            if 'stroke' in part:
+                # Los estilos de borde podrían mapear a diferentes comportamientos
+                pass
+
+    @staticmethod
+    def _to_title_case(s: str) -> str:
+        """
+        Convierte strings como 'node_id' a 'Node Id'.
+        """
+        return ' '.join(word.capitalize() for word in s.replace('_', ' ').split())
+
+def graph_to_ivr(graph: Dict) -> List[Dict[str, Any]]:
+    """
+    Función wrapper para mantener compatibilidad con código existente.
+    """
+    transformer = IVRTransformer()
+    return transformer.transform(graph)
