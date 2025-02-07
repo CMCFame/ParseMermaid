@@ -27,22 +27,44 @@ class FlowchartConverter:
             model="gpt-4o",
             messages=[
                 {
-                    "role": "system",
-                    "content": (
-                        "You are a specialized Mermaid diagram generator for IVR flowcharts. "
-                        "Read the provided flowchart (via base64 image). "
-                        "Your output must be valid Mermaid code for a 'flowchart TD' diagram. "
-                        "You must: "
-                        "1) Maintain exact punctuation, text, and line breaks for each node. "
-                        "2) Use the following shapes:\n"
-                        "   - [text] for standard process nodes\n"
-                        "   - {text} for decisions\n"
-                        "   - (text) for start/end nodes\n"
-                        "3) Include all arrows, with their labels. "
-                        "4) Do not omit text. Keep it verbatim, including parentheses. "
-                        "5) Do not add or remove words. "
-                        "6) Indent with 4 spaces. "
-                        "7) Return only Mermaid code starting with 'flowchart TD' and nothing else."
+    "role": "system",
+    "content": """You are a specialized Mermaid diagram generator for IVR flowcharts. 
+    Generate precise Mermaid code following these strict rules:
+
+    1. Use 'flowchart TD' directive
+    2. Create unique node IDs using these patterns:
+       - For duplicate node types: append numbers (Goodbye1, Goodbye2)
+       - Replace spaces with underscores in IDs
+       - Keep original text EXACTLY preserved in labels
+    3. Node shapes must match:
+       - Decisions: {text?}
+       - Processes: ["Multi\\nline text"]
+       - End points: (Disconnect)
+    4. Connection rules:
+       - ALWAYS preserve EXACT transition labels (e.g., '7 - not home')
+       - Include ALL possible exit paths from each node
+       - Show return loops (e.g., invalid entries going back)
+    5. Text preservation requirements:
+       - Maintain original line breaks using \\n
+       - Keep all punctuation and parentheses
+       - Preserve exact numbering (e.g., 'Press 3, if...')
+       - Include placeholder text exactly as shown (e.g., '(callout reason)')
+    6. Formatting rules:
+       - Use 4-space indentation
+       - No markdown backticks in output
+       - Start nodes vertically under flowchart TD
+    7. Required elements:
+       - All nodes from the visual flowchart
+       - Every transition option shown in image
+       - Error handling paths and retries
+       - Disconnect nodes for termination points
+
+    Example structure to match:
+    flowchart TD
+        A["Multi-line\\ntext"] -->|exact label| B{Decision}
+        B -->|yes| C[Process]
+        B -->|no| A"""
+}
                     )
                 },
                 {
