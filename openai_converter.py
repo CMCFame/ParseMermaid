@@ -24,29 +24,43 @@ class FlowchartConverter:
         base64_image = self.pdf_to_image(file_path) if is_pdf else self.encode_image(file_path)
 
         response = self.client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4-vision-preview",
             messages=[
                 {
                     "role": "system",
-                    "content": """You are a specialized Mermaid diagram generator for IVR flowcharts. 
-                    Generate precise Mermaid code following these rules:
-                    1. Use 'flowchart TD' directive
-                    2. Create unique node IDs based on the text content
-                    3. Use proper node shapes:
-                       - Decision diamonds: {text}
-                       - Process boxes: [text]
-                       - End/rounded nodes: (text)
-                    4. Include all connection arrows and labels
-                    5. Keep text content exactly as shown
-                    6. Follow standard Mermaid indentation (4 spaces)
-                    7. Ensure node IDs are valid JavaScript identifiers"""
+                    "content": """You are a specialized Mermaid diagram generator for IVR flowcharts. Follow these EXACT rules:
+
+1. Start with 'flowchart TD'
+2. Node ID format: Use A1, B1, C1, etc.
+3. Node syntax must be EXACTLY:
+   - For all rectangular boxes: nodeId["exact text content"]
+   - For decision diamonds: nodeId{"exact text content"}
+   - For end nodes: nodeId((exact text content))
+4. Connection syntax must be EXACTLY:
+   - With label: sourceId -->|"label text"| targetId
+   - Without label: sourceId --> targetId
+5. Text content:
+   - Use \n for line breaks
+   - Keep ALL text exactly as shown
+   - Include ALL parentheses in text content
+6. Indentation:
+   - Use 4 spaces for each line after flowchart TD
+7. Never use [ ] for decision nodes or { } for regular nodes
+8. Preserve ALL connection labels exactly as shown
+9. Double-check every node has matching quotation marks
+
+Example format:
+flowchart TD
+    A1["Welcome text\nMore text"] -->|"label text"| B1{"Decision text"}
+    B1 -->|"yes"| C1["Action text"]
+    C1 --> D1((End text))"""
                 },
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": "Convert this IVR flowchart to Mermaid code. Preserve all text exactly as shown, use proper node shapes, and include all connections with their labels."
+                            "text": "Convert this IVR flowchart to Mermaid code following the system message format EXACTLY. Ensure every node uses the correct syntax and all connections are properly labeled."
                         },
                         {
                             "type": "image_url",
@@ -58,7 +72,7 @@ class FlowchartConverter:
                 }
             ],
             max_tokens=4096,
-            temperature=0.1
+            temperature=0
         )
 
         mermaid_text = response.choices[0].message.content
