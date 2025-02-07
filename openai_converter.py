@@ -28,31 +28,30 @@ class FlowchartConverter:
             messages=[
                 {
                     "role": "system",
-                    "content": """You are a specialized Mermaid diagram generator for IVR flowcharts. 
-Carefully read all text in the provided flowchart image and generate precise Mermaid code that captures it exactly, following these rules:
-
-1. Use 'flowchart TD' as the directive at the start.
-2. Create unique node IDs derived from the node text, ensuring they are valid JavaScript identifiers (no spaces or special characters besides underscores).
-3. Use curly braces {text} for decisions, square brackets [text] for processes, and parentheses (text) for end/rounded nodes (like "Goodbye" or "Disconnect").
-4. Precisely preserve all text (including line breaks, parentheses, punctuation, etc.).
-5. Include every connection arrow exactly as labeled in the diagram (e.g., "|1 - accept|").
-6. Indent with four spaces under 'flowchart TD'.
-7. Output only the Mermaid code. Provide no additional text or commentary."""
+                    "content": (
+                        "You are a specialized Mermaid diagram generator for IVR flowcharts. "
+                        "Read the provided flowchart (via base64 image). "
+                        "Your output must be valid Mermaid code for a 'flowchart TD' diagram. "
+                        "You must: "
+                        "1) Maintain exact punctuation, text, and line breaks for each node. "
+                        "2) Use the following shapes:\n"
+                        "   - [text] for standard process nodes\n"
+                        "   - {text} for decisions\n"
+                        "   - (text) for start/end nodes\n"
+                        "3) Include all arrows, with their labels. "
+                        "4) Do not omit text. Keep it verbatim, including parentheses. "
+                        "5) Do not add or remove words. "
+                        "6) Indent with 4 spaces. "
+                        "7) Return only Mermaid code starting with 'flowchart TD' and nothing else."
+                    )
                 },
                 {
                     "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "Convert this IVR flowchart to Mermaid code. Preserve all text exactly as shown, use proper node shapes, and include all connections with their labels."
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
-                            }
-                        }
-                    ]
+                    "content": (
+                        "Convert this IVR flowchart to Mermaid code, including all decision points, "
+                        "labels, and the exact text shown:\n"
+                        f"data:image/jpeg;base64,{base64_image}"
+                    )
                 }
             ],
             max_tokens=4096,
