@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit_mermaid as st_mermaid
 import json
 import yaml
 from typing import Optional, Dict, Any
@@ -148,11 +149,11 @@ def main():
             )
 
     with col2:
-        # Vista previa del diagrama
+        # Vista previa del diagrama actualizada
         st.subheader("👁️ Vista Previa")
         if mermaid_text:
             try:
-                st.mermaid(mermaid_text)
+                st_mermaid.st_mermaid(mermaid_text)
             except Exception as e:
                 st.error(f"Error en la vista previa: {str(e)}")
 
