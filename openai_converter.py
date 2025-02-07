@@ -17,22 +17,36 @@ class FlowchartConverter:
         images = convert_from_path(pdf_path)
         img_byte_arr = io.BytesIO()
         images[0].save(img_byte_arr, format='PNG')
-        img_byte_arr = img_byte_arr.getvalue()
-        return base64.b64encode(img_byte_arr).decode('utf-8')
+        return base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
 
     def process_file(self, file_path):
         is_pdf = file_path.lower().endswith('.pdf')
         base64_image = self.pdf_to_image(file_path) if is_pdf else self.encode_image(file_path)
 
-        vision_response = self.client.chat.completions.create(
+        response = self.client.chat.completions.create(
             model="gpt-4o",
             messages=[
+                {
+                    "role": "system",
+                    "content": """You are a specialized Mermaid diagram generator for IVR flowcharts. 
+                    Generate precise Mermaid code following these rules:
+                    1. Use 'flowchart TD' directive
+                    2. Create unique node IDs based on the text content
+                    3. Use proper node shapes:
+                       - Decision diamonds: {text}
+                       - Process boxes: [text]
+                       - End/rounded nodes: (text)
+                    4. Include all connection arrows and labels
+                    5. Keep text content exactly as shown
+                    6. Follow standard Mermaid indentation (4 spaces)
+                    7. Ensure node IDs are valid JavaScript identifiers"""
+                },
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": "Analyze this flowchart image. Describe the flow nodes and their connections in detail, including all text content and decision paths. Focus especially on the exact text in each node and the conditions for each connection."
+                            "text": "Convert this IVR flowchart to Mermaid code. Preserve all text exactly as shown, use proper node shapes, and include all connections with their labels."
                         },
                         {
                             "type": "image_url",
@@ -43,27 +57,27 @@ class FlowchartConverter:
                     ]
                 }
             ],
-            max_tokens=4096
+            max_tokens=4096,
+            temperature=0.1
         )
 
-        description = vision_response.choices[0].message.content
-
-        mermaid_response = self.client.chat.completions.create(
-            model="gpt-4-turbo-preview",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert in converting flowchart descriptions to Mermaid syntax. Create precise Mermaid flowchart code that exactly matches the described nodes, connections, and conditions. Use proper Mermaid shapes: [] for process nodes, {} for decision nodes, () for rounded nodes. Include all text content exactly as given."
-                },
-                {
-                    "role": "user",
-                    "content": f"Convert this flowchart description to Mermaid syntax: {description}"
-                }
-            ],
-            max_tokens=4096
-        )
-
-        return mermaid_response.choices[0].message.content
+        mermaid_text = response.choices[0].message.content
+        
+        # Clean up the response
+        mermaid_text = mermaid_text.replace('```mermaid\n', '').replace('```', '')
+        if not mermaid_text.startswith('flowchart TD'):
+            mermaid_text = 'flowchart TD\n' + mermaid_text
+            
+        # Additional formatting cleanup
+        lines = mermaid_text.split('\n')
+        formatted_lines = []
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith('flowchart'):
+                line = '    ' + line
+            formatted_lines.append(line)
+            
+        return '\n'.join(formatted_lines)
 
 def process_flow_diagram(file_path: str, api_key: str) -> str:
     converter = FlowchartConverter(api_key)
