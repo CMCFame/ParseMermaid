@@ -69,19 +69,6 @@ def validate_mermaid(mermaid_text: str):
     except Exception as e:
         return f"Error validating diagram: {str(e)}"
 
-# Page configuration
-st.set_page_config(
-    page_title="Mermaid-to-IVR Converter",
-    page_icon="🔄",
-    layout="wide"
-)
-
-# Initialize session state
-if 'openai_key' not in st.session_state:
-    st.session_state.openai_key = None
-if 'mermaid_code' not in st.session_state:
-    st.session_state.mermaid_code = DEFAULT_MERMAID
-
 def convert_mermaid_to_ivr(mermaid_text: str, export_format: str, validate: bool, add_standard_nodes: bool):
     try:
         # Validate if required
@@ -96,8 +83,22 @@ def convert_mermaid_to_ivr(mermaid_text: str, export_format: str, validate: bool
         graph = parse_mermaid(mermaid_text)
         
         # Debug info
-        st.write("Parsed graph structure:")
-        st.json(graph)  # This will show us the parsed structure
+        st.write("Parsed node count:", len(graph.get('nodes', {})))
+        st.write("Parsed edge count:", len(graph.get('edges', [])))
+        
+        if not graph.get('nodes'):
+            st.error("No nodes were parsed from the diagram. This might be a parsing issue.")
+            st.write("Let's try to fix the parsing. Analyzing diagram structure...")
+            
+            # Extract node definitions from the Mermaid text
+            lines = mermaid_text.split('\n')
+            node_lines = [line.strip() for line in lines if '->' not in line and line.strip()]
+            st.write("Found potential node definitions:", len(node_lines))
+            for line in node_lines[:5]:  # Show first 5 as example
+                st.write(line)
+                
+        st.write("Full parsed graph structure:")
+        st.json(graph)
         
         st.write("Converting to IVR...")
         ivr_nodes = graph_to_ivr(graph)
@@ -108,7 +109,7 @@ def convert_mermaid_to_ivr(mermaid_text: str, export_format: str, validate: bool
             return
             
         st.write("Generated IVR nodes:")
-        st.json(ivr_nodes)  # This will show us the generated nodes
+        st.json(ivr_nodes)
         
         # Format output
         if export_format == "JavaScript":
