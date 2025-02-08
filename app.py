@@ -8,6 +8,67 @@ from parse_mermaid import parse_mermaid, MermaidParser
 from graph_to_ivr import graph_to_ivr
 from openai_converter import process_flow_diagram
 
+# Constants - this needs to be defined before it's used
+DEFAULT_MERMAID = '''flowchart TD
+    start["Start of call"]
+    available["Are you available?\nIf yes press 1, if no press 3"]
+    input{"input"}
+    invalid["Invalid entry. Please try again"]
+    accept["Accept"]
+    decline["Decline"]
+    done["End Flow"]
+
+    start --> available
+    available --> input
+    input -->|"invalid input\nor no input"| invalid
+    invalid --> input
+    input -->|"1 - accept"| accept
+    input -->|"3 - decline"| decline
+    accept --> done
+    decline --> done'''
+
+def load_example_flows():
+    """Load predefined example flows"""
+    return {
+        "Simple Callout": DEFAULT_MERMAID,
+        "PIN Change": '''flowchart TD
+    start["Enter PIN"]
+    validate{"Valid PIN?"}
+    new_pin["Enter new PIN"]
+    confirm["Confirm new PIN"]
+    match{"PINs match?"}
+    success["PIN changed successfully"]
+    error["Invalid entry"]
+    
+    start --> validate
+    validate -->|No| error
+    validate -->|Yes| new_pin
+    new_pin --> confirm
+    confirm --> match
+    match -->|No| error
+    match -->|Yes| success''',
+        "Transfer Flow": '''flowchart TD
+    start["Transfer Request"]
+    attempt{"Transfer\nAttempt"}
+    success["Transfer Complete"]
+    fail["Transfer Failed"]
+    end["End Call"]
+    
+    start --> attempt
+    attempt -->|Success| success
+    attempt -->|Fail| fail
+    success & fail --> end'''
+    }
+
+def validate_mermaid(mermaid_text: str):
+    """Validate Mermaid diagram syntax"""
+    try:
+        parser = MermaidParser()
+        parser.parse(mermaid_text)
+        return None
+    except Exception as e:
+        return f"Error validating diagram: {str(e)}"
+
 # Page configuration
 st.set_page_config(
     page_title="Mermaid-to-IVR Converter",
@@ -154,7 +215,7 @@ def convert_mermaid_to_ivr(mermaid_text: str, export_format: str, validate: bool
                 data=f,
                 file_name=f"ivr_flow.{export_format.lower()}",
                 mime="text/plain",
-                key="download_code"  # Added unique key
+                key="download_code"
             )
             
         os.unlink(tmp_file.name)
