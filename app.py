@@ -8,7 +8,7 @@ from parse_mermaid import parse_mermaid, MermaidParser
 from graph_to_ivr import graph_to_ivr
 from openai_converter import process_flow_diagram
 
-# Constants - this needs to be defined before it's used
+# Constants
 DEFAULT_MERMAID = '''flowchart TD
     start["Start of call"]
     available["Are you available?\nIf yes press 1, if no press 3"]
@@ -81,6 +81,65 @@ if 'openai_key' not in st.session_state:
     st.session_state.openai_key = None
 if 'mermaid_code' not in st.session_state:
     st.session_state.mermaid_code = DEFAULT_MERMAID
+
+def convert_mermaid_to_ivr(mermaid_text: str, export_format: str, validate: bool, add_standard_nodes: bool):
+    try:
+        # Validate if required
+        if validate:
+            error = validate_mermaid(mermaid_text)
+            if error:
+                st.error(error)
+                return
+
+        # Parse and convert with debug info
+        st.write("Parsing Mermaid diagram...")
+        graph = parse_mermaid(mermaid_text)
+        
+        # Debug info
+        st.write("Parsed graph structure:")
+        st.json(graph)  # This will show us the parsed structure
+        
+        st.write("Converting to IVR...")
+        ivr_nodes = graph_to_ivr(graph)
+        
+        # Check if nodes were generated
+        if not ivr_nodes:
+            st.error("No IVR nodes were generated. Please check your Mermaid diagram syntax.")
+            return
+            
+        st.write("Generated IVR nodes:")
+        st.json(ivr_nodes)  # This will show us the generated nodes
+        
+        # Format output
+        if export_format == "JavaScript":
+            output = "module.exports = " + json.dumps(ivr_nodes, indent=2) + ";"
+        elif export_format == "JSON":
+            output = json.dumps(ivr_nodes, indent=2)
+        else:  # YAML
+            output = yaml.dump(ivr_nodes, allow_unicode=True)
+
+        # Display results
+        st.subheader("📤 Generated Code")
+        st.code(output, language="javascript")
+        
+        # Download option
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=f'.{export_format.lower()}') as tmp_file:
+            tmp_file.write(output)
+            
+        with open(tmp_file.name, 'rb') as f:
+            st.download_button(
+                label="⬇️ Download Code",
+                data=f,
+                file_name=f"ivr_flow.{export_format.lower()}",
+                mime="text/plain",
+                key="download_code"
+            )
+            
+        os.unlink(tmp_file.name)
+
+    except Exception as e:
+        st.error(f"Conversion error: {str(e)}")
+        st.exception(e)
 
 def main():
     st.title("🔄 Mermaid-to-IVR Converter")
@@ -179,50 +238,6 @@ def main():
                 st_mermaid.st_mermaid(mermaid_text)
             except Exception as e:
                 st.error(f"Preview error: {str(e)}")
-
-def convert_mermaid_to_ivr(mermaid_text: str, export_format: str, validate: bool, add_standard_nodes: bool):
-    try:
-        # Validate if required
-        if validate:
-            error = validate_mermaid(mermaid_text)
-            if error:
-                st.error(error)
-                return
-
-        # Parse and convert
-        graph = parse_mermaid(mermaid_text)
-        ivr_nodes = graph_to_ivr(graph)
-        
-        # Format output
-        if export_format == "JavaScript":
-            output = "module.exports = " + json.dumps(ivr_nodes, indent=2) + ";"
-        elif export_format == "JSON":
-            output = json.dumps(ivr_nodes, indent=2)
-        else:  # YAML
-            output = yaml.dump(ivr_nodes, allow_unicode=True)
-
-        # Display results
-        st.subheader("📤 Generated Code")
-        st.code(output, language="javascript")
-        
-        # Download option
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=f'.{export_format.lower()}') as tmp_file:
-            tmp_file.write(output)
-            
-        with open(tmp_file.name, 'rb') as f:
-            st.download_button(
-                label="⬇️ Download Code",
-                data=f,
-                file_name=f"ivr_flow.{export_format.lower()}",
-                mime="text/plain",
-                key="download_code"
-            )
-            
-        os.unlink(tmp_file.name)
-
-    except Exception as e:
-        st.error(f"Conversion error: {str(e)}")
-        st.exception(e)
 
 if __name__ == "__main__":
     main()
