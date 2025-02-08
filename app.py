@@ -27,6 +27,19 @@ DEFAULT_MERMAID = '''flowchart TD
     accept --> done
     decline --> done'''
 
+# Page configuration
+st.set_page_config(
+    page_title="Mermaid-to-IVR Converter",
+    page_icon="🔄",
+    layout="wide"
+)
+
+# Initialize session state
+if 'openai_key' not in st.session_state:
+    st.session_state.openai_key = None
+if 'mermaid_code' not in st.session_state:
+    st.session_state.mermaid_code = DEFAULT_MERMAID
+
 def load_example_flows():
     """Load predefined example flows"""
     return {
@@ -69,93 +82,12 @@ def validate_mermaid(mermaid_text: str):
     except Exception as e:
         return f"Error validating diagram: {str(e)}"
 
-def convert_mermaid_to_ivr(mermaid_text: str, export_format: str, validate: bool, add_standard_nodes: bool):
-    try:
-        # Validate if required
-        if validate:
-            error = validate_mermaid(mermaid_text)
-            if error:
-                st.error(error)
-                return
-
-        # Parse and convert with debug info
-        st.write("Parsing Mermaid diagram...")
-        graph = parse_mermaid(mermaid_text)
-        
-        # Debug info
-        st.write("Parsed node count:", len(graph.get('nodes', {})))
-        st.write("Parsed edge count:", len(graph.get('edges', [])))
-        
-        if not graph.get('nodes'):
-            st.error("No nodes were parsed from the diagram. This might be a parsing issue.")
-            st.write("Let's try to fix the parsing. Analyzing diagram structure...")
-            
-            # Extract node definitions from the Mermaid text
-            lines = mermaid_text.split('\n')
-            node_lines = [line.strip() for line in lines if '->' not in line and line.strip()]
-            st.write("Found potential node definitions:", len(node_lines))
-            for line in node_lines[:5]:  # Show first 5 as example
-                st.write(line)
-                
-        st.write("Full parsed graph structure:")
-        st.json(graph)
-        
-        st.write("Converting to IVR...")
-        ivr_nodes = graph_to_ivr(graph)
-        
-        # Check if nodes were generated
-        if not ivr_nodes:
-            st.error("No IVR nodes were generated. Please check your Mermaid diagram syntax.")
-            return
-            
-        st.write("Generated IVR nodes:")
-        st.json(ivr_nodes)
-        
-        # Format output
-        if export_format == "JavaScript":
-            output = "module.exports = " + json.dumps(ivr_nodes, indent=2) + ";"
-        elif export_format == "JSON":
-            output = json.dumps(ivr_nodes, indent=2)
-        else:  # YAML
-            output = yaml.dump(ivr_nodes, allow_unicode=True)
-
-        # Display results
-        st.subheader("📤 Generated Code")
-        st.code(output, language="javascript")
-        
-        # Download option
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=f'.{export_format.lower()}') as tmp_file:
-            tmp_file.write(output)
-            
-        with open(tmp_file.name, 'rb') as f:
-            st.download_button(
-                label="⬇️ Download Code",
-                data=f,
-                file_name=f"ivr_flow.{export_format.lower()}",
-                mime="text/plain",
-                key="download_code"
-            )
-            
-        os.unlink(tmp_file.name)
-
-    except Exception as e:
-        st.error(f"Conversion error: {str(e)}")
-        st.exception(e)
-
 def main():
     st.title("🔄 Mermaid-to-IVR Converter")
     
     # Sidebar with options
     with st.sidebar:
         st.header("⚙️ Options")
-        
-        # OpenAI API Key input
-        st.session_state.openai_key = st.text_input(
-            "OpenAI API Key",
-            value=st.session_state.openai_key if st.session_state.openai_key else "",
-            type="password",
-            help="Required for file conversion"
-        )
         
         # Load example
         example_flows = load_example_flows()
@@ -176,10 +108,18 @@ def main():
         add_standard_nodes = st.checkbox("Add standard nodes", value=True)
         validate_diagram = st.checkbox("Validate diagram", value=True)
 
-    # Main content area with two columns
+    # Main content area
     col1, col2 = st.columns([3, 2])
     
     with col1:
+        # OpenAI API Key
+        st.session_state.openai_key = st.text_input(
+            "OpenAI API Key",
+            value=st.session_state.openai_key if st.session_state.openai_key else "",
+            type="password",
+            help="Required for file conversion"
+        )
+
         # File uploader
         uploaded_file = st.file_uploader(
             "Upload a flowchart (PDF, PNG, JPG)",
@@ -230,7 +170,47 @@ def main():
 
         # Convert button for Mermaid
         if st.button("Convert to IVR Code", key="convert_mermaid"):
-            convert_mermaid_to_ivr(mermaid_text, export_format, validate_diagram, add_standard_nodes)
+            try:
+                # Validate if required
+                if validate_diagram:
+                    error = validate_mermaid(mermaid_text)
+                    if error:
+                        st.error(error)
+                        return
+
+                # Parse and convert
+                graph = parse_mermaid(mermaid_text)
+                ivr_nodes = graph_to_ivr(graph)
+                
+                # Format output
+                if export_format == "JavaScript":
+                    output = "module.exports = " + json.dumps(ivr_nodes, indent=2) + ";"
+                elif export_format == "JSON":
+                    output = json.dumps(ivr_nodes, indent=2)
+                else:  # YAML
+                    output = yaml.dump(ivr_nodes, allow_unicode=True)
+
+                # Show result
+                st.subheader("📤 Generated Code")
+                st.code(output, language="javascript")
+                
+                # Download options
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=f'.{export_format.lower()}') as tmp_file:
+                    tmp_file.write(output)
+                    
+                with open(tmp_file.name, 'rb') as f:
+                    st.download_button(
+                        label="⬇️ Download Code",
+                        data=f,
+                        file_name=f"ivr_flow.{export_format.lower()}",
+                        mime="text/plain",
+                        key="download_code"
+                    )
+                os.unlink(tmp_file.name)
+
+            except Exception as e:
+                st.error(f"Conversion error: {str(e)}")
+                st.exception(e)
 
     with col2:
         st.subheader("👁️ Preview")

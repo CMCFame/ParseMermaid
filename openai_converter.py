@@ -76,8 +76,7 @@ class FlowchartConverter:
    - Use 4 spaces for each line after flowchart TD
 7. Never use [ ] for decision nodes or { } for regular nodes
 8. Preserve ALL connection labels exactly as shown
-9. Double-check every node has matching quotation marks
-10. Ensure all syntax is valid Mermaid code"""
+9. Double-check every node has matching quotation marks"""
                     },
                     {
                         "role": "user",
