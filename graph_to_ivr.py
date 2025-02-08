@@ -52,10 +52,6 @@ class IVRTransformer:
         styles = graph.get('styles', {})
 
         ivr_nodes = []
-        
-        # Add initial node if needed
-        if not any(n.raw_text.lower().startswith('start') for n in nodes_dict.values()):
-            ivr_nodes.append(self.standard_nodes["start"])
 
         # Process each node
         for node_id, node in nodes_dict.items():
@@ -63,10 +59,8 @@ class IVRTransformer:
             if ivr_node:
                 ivr_nodes.append(ivr_node)
 
-        # Add standard nodes if they don't exist
-        if not any(n["label"] == "Problems" for n in ivr_nodes):
-            ivr_nodes.append(self.standard_nodes["problems"])
-        if not any(n["label"] == "Goodbye" for n in ivr_nodes):
+        # Add standard nodes only if needed
+        if not any(n.get("label", "").lower() == "goodbye" for n in ivr_nodes):
             ivr_nodes.append(self.standard_nodes["goodbye"])
 
         return ivr_nodes
@@ -89,7 +83,7 @@ class IVRTransformer:
         else:
             self._handle_action_node(ivr_node, node, edges)
 
-        # Add special commands based on text or type
+        # Add special commands based on text
         self._add_special_commands(ivr_node, raw_text)
 
         return ivr_node
@@ -112,17 +106,22 @@ class IVRTransformer:
 
         for edge in out_edges:
             if edge.label:
+                # Handle retry logic
+                if "retry" in str(edge.label).lower():
+                    continue
+                    
                 # Detect patterns in labels
-                digit_match = re.match(r'^(\d+)\s*-\s*(.*)', edge.label)
+                digit_match = re.match(r'^(\d+)\s*-\s*(.*)', str(edge.label))
                 if digit_match:
                     digit, action = digit_match.groups()
                     branch_map[digit] = self._to_title_case(edge.to_id)
                     digit_choices.append(digit)
-                elif re.search(r'invalid|no input', edge.label, re.IGNORECASE):
+                elif re.search(r'invalid|no input', str(edge.label), re.IGNORECASE):
                     branch_map["error"] = self._to_title_case(edge.to_id)
                     branch_map["none"] = self._to_title_case(edge.to_id)
                 else:
-                    branch_map[edge.label] = self._to_title_case(edge.to_id)
+                    clean_label = edge.label.strip('"') if edge.label else ""
+                    branch_map[clean_label] = self._to_title_case(edge.to_id)
 
         if digit_choices:
             ivr_node["getDigits"]["validChoices"] = "|".join(digit_choices)
@@ -139,33 +138,52 @@ class IVRTransformer:
         else:
             ivr_node["playPrompt"] = [f"tts:{node.raw_text}"]
 
-        # If there's a single output, add goto
-        if len(out_edges) == 1:
-            ivr_node["goto"] = self._to_title_case(out_edges[0].to_id)
+        # Handle incoming retry edges
+        in_edges = [e for e in edges if e.to_id == node.id]
+        has_retry = any("retry" in str(e.label).lower() for e in in_edges)
+        if has_retry:
+            if "maxLoop" not in ivr_node:
+                ivr_node["maxLoop"] = ["Retry", 3, "Problems"]
+
+        # If there's a single non-retry output, add goto
+        regular_out_edges = [e for e in out_edges if not (e.label and "retry" in str(e.label).lower())]
+        if len(regular_out_edges) == 1:
+            ivr_node["goto"] = self._to_title_case(regular_out_edges[0].to_id)
 
     def _add_special_commands(self, ivr_node: Dict, raw_text: str):
         """Adds special commands based on node text."""
         text_lower = raw_text.lower()
         
+        # Handle result codes
         for key, (code, name) in self.result_codes.items():
             if key in text_lower:
                 ivr_node["gosub"] = ["SaveCallResult", code, name]
                 break
 
         # Add nobarge for certain message types
-        if any(keyword in text_lower for keyword in ["goodbye", "recorded", "message", "please"]):
+        if any(keyword in text_lower for keyword in ["goodbye", "recorded", "message", "please", "welcome"]):
             ivr_node["nobarge"] = "1"
 
-        # Detect transfers
-        if "transfer" in text_lower:
-            ivr_node.update({
-                "setvar": {"transfer_ringback": "callflow:2223"},
-                "include": "../../util/xfer.js",
-                "gosub": "XferCall"
-            })
+        # Handle PIN entry
+        if "pin" in text_lower:
+            ivr_node["getDigits"] = {
+                "numDigits": 4,
+                "terminator": "#",
+                "maxTries": 3,
+                "maxTime": 7,
+                "errorPrompt": "callflow:1009",
+                "nonePrompt": "callflow:1009"
+            }
+
+        # Handle disconnect nodes
+        if "disconnect" in text_lower or node_type == NodeType.CIRCLE:
+            ivr_node["goto"] = "hangup"
 
     def _find_audio_prompt(self, text: str) -> Optional[str]:
         """Searches for a matching audio prompt."""
+        if not text:
+            return None
+
         # Try exact match first
         if text in AUDIO_PROMPTS:
             return AUDIO_PROMPTS[text]

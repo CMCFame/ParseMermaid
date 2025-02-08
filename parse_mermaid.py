@@ -31,21 +31,20 @@ class Edge:
 
 class MermaidParser:
     def __init__(self):
-        # Simpler, proven regex patterns
+        # Updated node patterns to better match your diagram
         self.node_patterns = {
             NodeType.NORMAL: re.compile(r'^(\w+)\s*\["([^"]+)"\]'),
             NodeType.RHOMBUS: re.compile(r'^(\w+)\s*\{"([^"]+)"\}'),
             NodeType.CIRCLE: re.compile(r'^(\w+)\s*\(\("([^"]+)"\)\)')
         }
         
+        # Updated edge pattern to better handle labeled edges
         self.edge_pattern = re.compile(
-            r'(\w+)\s*-->\s*(?:\|([^|]*)\|)?\s*(\w+)'
+            r'(\w+)\s*-->\s*(?:\|"([^"]*?)"\|)?\s*(\w+)'
         )
 
     def parse(self, mermaid_text: str) -> Dict:
-        """
-        Parses a Mermaid diagram and returns a complete data structure.
-        """
+        """Parses a Mermaid diagram and returns a complete data structure."""
         lines = mermaid_text.split('\n')
         
         nodes: Dict[str, Node] = {}
@@ -54,7 +53,7 @@ class MermaidParser:
         for line in lines:
             line = line.strip()
             
-            # Skip empty lines and comments
+            # Skip empty lines, comments and flowchart declaration
             if not line or line.startswith('%%') or line.startswith('flowchart'):
                 continue
 
@@ -64,7 +63,7 @@ class MermaidParser:
                 match = pattern.match(line)
                 if match:
                     node_id = match.group(1)
-                    raw_text = match.group(2)
+                    raw_text = match.group(2).replace('\\n', '\n').strip()
                     nodes[node_id] = Node(
                         id=node_id,
                         raw_text=raw_text,
@@ -97,8 +96,6 @@ class MermaidParser:
         }
 
 def parse_mermaid(mermaid_text: str) -> Dict:
-    """
-    Wrapper function to maintain compatibility with existing code.
-    """
+    """Wrapper function to maintain compatibility with existing code."""
     parser = MermaidParser()
     return parser.parse(mermaid_text)
