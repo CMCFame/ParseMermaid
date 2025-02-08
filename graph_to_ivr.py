@@ -2,16 +2,16 @@ from typing import Dict, List, Optional, Any
 import re
 from parse_mermaid import Node, Edge, NodeType
 
-# Standard audio prompts from examples
 AUDIO_PROMPTS = {
-    "Welcome": "callflow:1210",
-    "Invalid Entry": "callflow:1009",
+    "Invalid entry": "callflow:1009",
     "Enter PIN": "callflow:1008",
-    "Accepted Response": "callflow:1167",
-    "Decline Response": "callflow:1021",
-    "Not Home": "callflow:1017",
+    "Accepted response": "callflow:1167",
+    "Decline response": "callflow:1021",
+    "Please have": "callflow:1017",
     "Goodbye": "callflow:1029",
-    "Problems": "callflow:1351"
+    "Problems": "callflow:1351",
+    "Welcome": "callflow:1210",
+    "Transfer": "callflow:2223"
 }
 
 class IVRTransformer:
@@ -24,7 +24,7 @@ class IVRTransformer:
             },
             "goodbye": {
                 "label": "Goodbye",
-                "log": "Goodbye message",
+                "log": "Goodbye(1029)",
                 "playPrompt": ["callflow:1029"],
                 "nobarge": "1",
                 "goto": "hangup"
@@ -40,8 +40,8 @@ class IVRTransformer:
 
     def transform(self, graph: Dict) -> List[Dict[str, Any]]:
         """Transforms the parsed graph into a list of IVR nodes."""
-        nodes_dict = graph['nodes']
-        edges = graph['edges']
+        nodes_dict = graph.get('nodes', {})
+        edges = graph.get('edges', [])
         ivr_nodes = []
 
         # Process each node
@@ -60,24 +60,20 @@ class IVRTransformer:
 
     def _transform_node(self, node: Node, edges: List[Edge]) -> Optional[Dict]:
         """Transforms an individual node to IVR format."""
-        node_id = node.id
-        raw_text = node.raw_text
-        node_type = node.node_type
-        
         # Build base node
         ivr_node = {
-            "label": self._to_title_case(node_id),
-            "log": raw_text
+            "label": self._to_title_case(node.id),
+            "log": node.raw_text
         }
 
         # Handle different node types
-        if node_type == NodeType.RHOMBUS:
+        if getattr(node, 'node_type', None) == NodeType.RHOMBUS:
             self._handle_decision_node(ivr_node, node, edges)
         else:
             self._handle_action_node(ivr_node, node, edges)
 
         # Add special commands based on node content
-        self._add_special_commands(ivr_node, raw_text)
+        self._add_special_commands(ivr_node, node.raw_text)
 
         return ivr_node
 
@@ -85,7 +81,6 @@ class IVRTransformer:
         """Sets up a decision node with getDigits and branch."""
         out_edges = [e for e in edges if e.from_id == node.id]
         
-        # Standard getDigits configuration
         ivr_node["getDigits"] = {
             "numDigits": 1,
             "maxTries": 3,
@@ -100,10 +95,11 @@ class IVRTransformer:
 
         for edge in out_edges:
             if edge.label:
-                # Handle different label patterns
+                # Handle retry logic
                 if "retry" in str(edge.label).lower():
                     continue
-                    
+                
+                # Extract digit choices
                 digit_match = re.match(r'^(\d+)\s*-\s*(.*)', str(edge.label))
                 if digit_match:
                     digit, action = digit_match.groups()
@@ -135,8 +131,8 @@ class IVRTransformer:
         if any(keyword in node.raw_text.lower() for keyword in ["welcome", "message", "please", "goodbye"]):
             ivr_node["nobarge"] = "1"
 
-        # Handle single output connection
-        if len(out_edges) == 1 and not any("retry" in str(e.label).lower() for e in out_edges):
+        # Handle single output
+        if len(out_edges) == 1:
             ivr_node["goto"] = self._to_title_case(out_edges[0].to_id)
 
     def _add_special_commands(self, ivr_node: Dict, raw_text: str):
@@ -151,46 +147,33 @@ class IVRTransformer:
 
         # Handle PIN entry
         if "pin" in text_lower:
-            ivr_node.update({
-                "getDigits": {
-                    "numDigits": 5,
-                    "maxTries": 3,
-                    "maxTime": 7,
-                    "validChoices": "{{pin}}",
-                    "errorPrompt": "callflow:1009",
-                    "nonePrompt": "callflow:1009"
-                },
-                "branch": {
-                    "error": "Problems",
-                    "none": "Problems"
-                }
-            })
-            ivr_node["nobarge"] = "1"
+            ivr_node["getDigits"] = {
+                "numDigits": 5,
+                "maxTries": 3,
+                "maxTime": 7,
+                "validChoices": "{{pin}}",
+                "errorPrompt": "callflow:1009",
+                "nonePrompt": "callflow:1009"
+            }
+            ivr_node["branch"] = {
+                "error": "Problems",
+                "none": "Problems"
+            }
 
         # Handle disconnect nodes
-        if "disconnect" in text_lower or any("end" in s.lower() for s in [raw_text, ivr_node.get("label", "")]):
+        if "disconnect" in text_lower:
             ivr_node["goto"] = "hangup"
 
     def _find_audio_prompt(self, text: str) -> Optional[str]:
         """Finds matching audio prompt for the text."""
+        if not text:
+            return None
+            
         text_lower = text.lower()
         
         # Try exact matches first
         for key, prompt in AUDIO_PROMPTS.items():
             if key.lower() in text_lower:
-                return prompt
-
-        # Try keyword matches
-        keywords = {
-            "invalid": "callflow:1009",
-            "pin": "callflow:1008",
-            "accept": "callflow:1167",
-            "decline": "callflow:1021",
-            "goodbye": "callflow:1029"
-        }
-        
-        for keyword, prompt in keywords.items():
-            if keyword in text_lower:
                 return prompt
 
         return None
