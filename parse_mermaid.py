@@ -1,92 +1,125 @@
 import re
 from typing import Dict, List, Optional, Union
 from dataclasses import dataclass
+from enum import Enum
+
+class NodeType(Enum):
+    NORMAL = "normal"         # []
+    ROUND = "round"          # ()
+    STADIUM = "stadium"      # ([])
+    SUBROUTINE = "subroutine"# [[]]
+    CYLINDRICAL = "cylindrical" # [()]
+    CIRCLE = "circle"        # (())
+    ASYMMETRIC = "asymmetric"# >]
+    RHOMBUS = "rhombus"     # {}
+    HEXAGON = "hexagon"     # {{}}
 
 @dataclass
 class Node:
     id: str
     raw_text: str
-    node_type: str  # 'normal', 'decision', 'end'
-    edges: List['Edge'] = None
-
-    def __post_init__(self):
-        if self.edges is None:
-            self.edges = []
-
+    node_type: NodeType
+    style_classes: List[str]
+    subgraph: Optional[str] = None
+    
 @dataclass
 class Edge:
-    source: str
-    target: str
+    from_id: str
+    to_id: str
     label: Optional[str] = None
+    style: Optional[str] = None
 
 class MermaidParser:
     def __init__(self):
-        # Updated regex patterns to handle multi-line content
-        self.node_regex = re.compile(r'^\s*(\w+)\s*(\["|{"|"\(|\(\()(.*?)("\]|"}"|"\)|"\))"?\s*$', re.DOTALL)
-        self.edge_regex = re.compile(r'^\s*(\w+)\s*--?>(?:\|"([^"]*)"\|)?\s*(\w+)')
+        # Updated regex patterns for better multiline support
+        self.node_patterns = {
+            NodeType.NORMAL: re.compile(r'^(\w+)\s*\[((?:"[^"]*"|[^\]])*)\]', re.MULTILINE),
+            NodeType.RHOMBUS: re.compile(r'^(\w+)\s*\{((?:"[^"]*"|[^\}])*)\}', re.MULTILINE),
+            NodeType.CIRCLE: re.compile(r'^(\w+)\s*\(\(((?:"[^"]*"|[^\)])*)\)\)', re.MULTILINE)
+        }
+        
+        self.edge_pattern = re.compile(
+            r'(\w+)\s*-->(?:\|((?:"[^"]*"|[^|])*)\|)?\s*(\w+)'
+        )
+        
+        self.subgraph_pattern = re.compile(
+            r'^subgraph\s+(\w+)(?:\s*\[([^\]]+)\])?'
+        )
+        
+        self.class_def_pattern = re.compile(
+            r'^classDef\s+(\w+)\s+(.+)$'
+        )
+        
+        self.class_pattern = re.compile(
+            r'^class\s+(\w+)\s+(\w+)$'
+        )
+        
+        self.end_pattern = re.compile(r'^end\s*$')
+
+    def clean_text(self, text: str) -> str:
+        """Clean node text by removing extra quotes and normalizing newlines"""
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1]
+        return text.replace('\\n', '\n').strip()
 
     def parse(self, mermaid_text: str) -> Dict:
-        """Parse Mermaid flowchart text into a structured format."""
-        # Preprocess to handle multiline nodes
-        lines = []
-        current_line = []
+        """Parses a Mermaid diagram and returns a complete data structure."""
+        # Normalize line endings and clean input
+        mermaid_text = mermaid_text.replace('\r\n', '\n').strip()
+        lines = mermaid_text.split('\n')
         
-        for line in mermaid_text.strip().split('\n'):
+        nodes: Dict[str, Node] = {}
+        edges: List[Edge] = []
+        subgraphs: Dict[str, dict] = {}
+        styles: Dict[str, str] = {}
+        node_classes: Dict[str, List[str]] = {}
+        
+        current_subgraph = None
+        
+        # First pass: collect all node definitions
+        content = '\n'.join(lines)
+        for node_type, pattern in self.node_patterns.items():
+            for match in pattern.finditer(content):
+                node_id = match.group(1)
+                node_text = self.clean_text(match.group(2))
+                nodes[node_id] = Node(
+                    id=node_id,
+                    raw_text=node_text,
+                    node_type=node_type,
+                    style_classes=node_classes.get(node_id, []),
+                    subgraph=current_subgraph
+                )
+
+        # Second pass: collect all edges
+        for line in lines:
             line = line.strip()
-            if not line or line.startswith('flowchart'):
+            
+            # Skip empty lines, comments and node definitions
+            if not line or line.startswith('%%') or any(p.match(line) for p in self.node_patterns.values()):
                 continue
                 
-            # Count quotes to determine if node definition is complete
-            quotes = line.count('"')
-            current_line.append(line)
-            
-            if quotes % 2 == 0:  # Complete node or edge definition
-                lines.append(' '.join(current_line))
-                current_line = []
-
-        nodes = {}
-        edges = []
-
-        # Process lines
-        for line in lines:
-            # Try to match node definition
-            node_match = self.node_regex.match(line)
-            if node_match:
-                node_id, start_delim, text, end_delim = node_match.groups()
-                node_type = self._determine_node_type(start_delim)
-                nodes[node_id] = {
-                    'id': node_id,
-                    'raw_text': text.replace('\\n', '\n').strip(),
-                    'node_type': node_type
-                }
-                continue
-
-            # Try to match edge definition
-            edge_match = self.edge_regex.match(line)
-            if edge_match:
-                source, label, target = edge_match.groups()
-                edges.append({
-                    'from': source,
-                    'to': target,
-                    'label': label.strip() if label else None
-                })
+            # Process edges
+            edge_matches = self.edge_pattern.finditer(line)
+            for match in edge_matches:
+                from_id = match.group(1)
+                label = match.group(2)
+                to_id = match.group(3)
+                
+                if label:
+                    label = self.clean_text(label)
+                
+                edges.append(Edge(
+                    from_id=from_id,
+                    to_id=to_id,
+                    label=label
+                ))
 
         return {
-            'nodes': nodes,
-            'edges': edges
+            "nodes": nodes,
+            "edges": edges,
+            "subgraphs": subgraphs,
+            "styles": styles
         }
-
-    def _determine_node_type(self, delimiter: str) -> str:
-        """Determine the type of node based on its delimiter."""
-        if '{' in delimiter:
-            return 'decision'
-        elif '(' in delimiter:
-            return 'end'
-        return 'normal'
-
-    def _clean_text(self, text: str) -> str:
-        """Clean node text content."""
-        return text.replace('\\n', '\n').strip()
 
 def parse_mermaid(mermaid_text: str) -> Dict:
     """Wrapper function to maintain compatibility with existing code."""
