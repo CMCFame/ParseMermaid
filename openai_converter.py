@@ -91,31 +91,29 @@ class FlowchartConverter:
                         "role": "system",
                         "content": """You are an expert Mermaid diagram generator specializing in complex flowchart conversions. 
 
-STRICT MERMAID SYNTAX REQUIREMENTS:
-1. Use 'flowchart TD' for top-down flow
-2. Node IDs: Use A1, B1, etc. for unique identification
-3. Text Formatting:
+MERMAID SYNTAX GUIDELINES:
+1. Always start with 'flowchart TD'
+2. Use unique node IDs (A1, B1, C1, etc.)
+3. Node Text Formatting:
    - Use <br> for line breaks
    - Escape special characters
    - Enclose text in square brackets with quotes
 4. Connection Syntax:
    - Standard connection: -->
    - Labeled connection: -->| label |
-   - Handle all paths, including retry and error flows
+   - Capture all paths, including error and retry flows
 5. Decision Nodes:
    - Use {} for decision/diamond nodes
 6. Preserve Complete Flow:
    - Capture all decision points
    - Include all original messaging
    - Maintain logical flow
-7. Error Handling:
-   - Show retry paths
-   - Handle invalid inputs
-8. Readability:
-   - Clear, descriptive node labels
-   - Logical, intuitive flow
+7. Handle:
+   - Retry paths
+   - Invalid inputs
+   - Alternative routes
 
-CRITICAL GUIDELINES:
+CRITICAL REQUIREMENTS:
 - 100% Accuracy to Source Diagram
 - No Information Loss
 - Exact Path Replication"""
@@ -123,7 +121,7 @@ CRITICAL GUIDELINES:
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "Convert this complex call flow diagram to precise Mermaid syntax. Capture EVERY detail accurately."},
+                            {"type": "text", "text": "Convert this complex call flow diagram to precise Mermaid syntax."},
                             {
                                 "type": "image_url", 
                                 "image_url": {

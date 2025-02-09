@@ -73,24 +73,31 @@ def render_mermaid_safely(mermaid_text: str):
     Safely render Mermaid diagram with multiple fallback strategies
     """
     try:
-        # Try standard Mermaid rendering
-        st_mermaid.st_mermaid(mermaid_text)
-    except Exception as standard_error:
-        st.warning("Standard Mermaid rendering failed. Attempting alternative rendering.")
+        # Sanitize the Mermaid text
+        mermaid_text = mermaid_text.replace('"', '\\"')
         
-        try:
-            # Try rendering with explicit configuration
-            st.markdown(f"""
-            <div class="mermaid">
-            {mermaid_text}
-            </div>
-            <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-            <script>mermaid.initialize({{startOnLoad:true}});</script>
-            """, unsafe_allow_html=True)
-        except Exception as alt_error:
-            st.error(f"Mermaid rendering failed. Please check your diagram syntax.")
-            st.code(mermaid_text, language="mermaid")
-            st.error(f"Rendering Errors:\n1. {standard_error}\n2. {alt_error}")
+        # Attempt rendering with custom HTML and JavaScript
+        st.markdown(f"""
+        <div id="mermaid-container"></div>
+        <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+        <script>
+        try {{
+            mermaid.initialize({{startOnLoad:false}});
+            const container = document.getElementById('mermaid-container');
+            const insertSvg = function(svgCode, bindFunctions) {{
+                container.innerHTML = svgCode;
+            }};
+            
+            const graphDefinition = `{mermaid_text}`;
+            mermaid.render('mermaidGraph', graphDefinition, insertSvg);
+        }} catch (error) {{
+            console.error('Mermaid rendering error:', error);
+        }}
+        </script>
+        """, unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"Mermaid rendering failed: {e}")
+        st.code(mermaid_text, language="mermaid")
 
 def main():
     st.set_page_config(
