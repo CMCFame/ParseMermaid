@@ -100,18 +100,16 @@ STRICT FORMAT:
             
             mermaid_text = response.choices[0].message.content.strip()
             
-            mermaid_text = self._format_mermaid_code(mermaid_text)
-            
-            return mermaid_text
+            return self._format_mermaid_code(mermaid_text)
         except Exception as e:
             self.logger.error(f"Conversion failed: {e}")
             raise
     
     def _format_mermaid_code(self, mermaid_text: str) -> str:
-        mermaid_text = mermaid_text.replace("[", "[").replace("]", "]")
-        mermaid_text = re.sub(r'([^{}])\n', r'\1\\n', mermaid_text)
-        mermaid_text = re.sub(r'(?<!\\n)"', '"', mermaid_text)
+        mermaid_text = re.sub(r'```mermaid\\n(.*?)\\n```', r'\1', mermaid_text, flags=re.DOTALL)
+        mermaid_text = re.sub(r'\\n', '\\n', mermaid_text)  # Ensure proper line breaks
         mermaid_text = re.sub(r'\b(if|decision|question)\b', r'{\1}', mermaid_text, flags=re.IGNORECASE)
+        mermaid_text = re.sub(r'\[([^\]]+)\]', r'["\1"]', mermaid_text)  # Ensure square brackets
         return mermaid_text
 
 def process_flow_diagram(file_path: str, api_key: Optional[str] = None) -> str:
