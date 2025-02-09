@@ -110,7 +110,7 @@ class FlowchartConverter:
 
         try:
             response = openai.ChatCompletion.create(
-                model="gpt-4",  # or "gpt-3.5-turbo" if GPT-4 is unavailable
+                model="gpt-4o",  # or "gpt-3.5-turbo" if GPT-4 is unavailable
                 messages=messages,
                 max_tokens=2048,
                 temperature=0.0
