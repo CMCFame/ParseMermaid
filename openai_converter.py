@@ -142,11 +142,7 @@ flowchart TD
             mermaid_text = response.choices[0].message.content.strip()
             
             # Clean up code block markers and extract Mermaid content
-            mermaid_match = re.search(r'
-
-mermaid\n(.*?)
-
-', mermaid_text, re.DOTALL)
+            mermaid_match = re.search(r'```mermaid\n(.*?)\n```', mermaid_text, re.DOTALL)
             if mermaid_match:
                 mermaid_text = mermaid_match.group(1).strip()
             

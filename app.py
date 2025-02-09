@@ -199,69 +199,10 @@ def main():
                 finally:
                     # Clean up temporary file
                     os.unlink(tmp_file_path)
-
-    # Diagram preview column
-    col1, col2 = st.columns([2, 1])
     
-    with col1:
-        # Conversion button
-        if st.button("🔄 Convert to IVR Code"):
-            try:
-                # Optional syntax validation
-                if validate_syntax and mermaid_text:
-                    validation_error = validate_mermaid(mermaid_text)
-                    if validation_error:
-                        st.error(validation_error)
-                        return
-
-                # Parse and convert
-                parsed_graph = parse_mermaid(mermaid_text)
-                ivr_nodes = graph_to_ivr(parsed_graph)
-                
-                # Format output
-                output = format_ivr_code(
-                    ivr_nodes, 
-                    export_format.lower()
-                )
-
-                # Display results
-                st.subheader("📤 Generated IVR Configuration")
-                st.code(output, language="javascript")
-
-                # Debug information
-                if show_debug_info:
-                    with st.expander("Conversion Details"):
-                        st.json(parsed_graph)
-                        st.json(ivr_nodes)
-
-                # Temporary file and download
-                temp_file = save_temp_file(
-                    output, 
-                    suffix=f'.{export_format.lower()}'
-                )
-                
-                with open(temp_file, 'rb') as f:
-                    st.download_button(
-                        label="⬇️ Download Configuration",
-                        data=f,
-                        file_name=f"ivr_flow.{export_format.lower()}",
-                        mime="text/plain"
-                    )
-                os.unlink(temp_file)
-
-            except Exception as e:
-                st.error(f"Conversion Error: {e}")
-                if show_debug_info:
-                    st.exception(e)
-
-    with col2:
-        # Diagram preview
-        st.subheader("👁️ Preview")
-        try:
-            if mermaid_text:
-                render_mermaid_safely(mermaid_text)
-        except Exception as e:
-            st.error(f"Preview Error: {e}")
+    with st.expander("👁️ Preview"):
+        if mermaid_text:
+            render_mermaid_safely(mermaid_text)
 
 if __name__ == "__main__":
     main()

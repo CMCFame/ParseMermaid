@@ -1,5 +1,3 @@
-## graph_to_ivr.py
-
 from typing import Dict, List, Optional, Any
 import re
 from parse_mermaid import Node, Edge, NodeType
