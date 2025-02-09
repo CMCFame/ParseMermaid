@@ -1,26 +1,39 @@
 """
-Enhanced OpenAI-based IVR conversion with debugging
+Enhanced OpenAI-based IVR conversion with detailed debugging
 """
 from typing import Dict, List, Any
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 import json
 import logging
 import traceback
+import sys
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
+# Configure logging with more detail
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
 
 class OpenAIIVRConverter:
     def __init__(self, api_key: str):
-        logger.debug("Initializing OpenAIIVRConverter")
+        logger.info("Initializing OpenAIIVRConverter")
         if not api_key:
             raise ValueError("OpenAI API key is required")
-        self.client = OpenAI(api_key=api_key)
+        try:
+            self.client = OpenAI(api_key=api_key)
+            logger.info("OpenAI client initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI client: {str(e)}")
+            raise
 
     def convert_to_ivr(self, mermaid_code: str) -> str:
         """Convert Mermaid diagram to IVR configuration using GPT-4"""
-        logger.debug("Starting conversion process")
+        logger.info("Starting conversion process")
+        logger.debug(f"Input Mermaid code length: {len(mermaid_code)}")
         
         prompt = f"""You are an expert IVR system developer. Create a precise, 1:1 IVR configuration from this Mermaid flowchart following these exact requirements:
 
@@ -103,7 +116,7 @@ class OpenAIIVRConverter:
         Return only the JavaScript code in module.exports format. Do not include any explanations or comments."""
 
         try:
-            logger.debug("Making OpenAI API call")
+            logger.info("Making OpenAI API call")
             response = self.client.chat.completions.create(
                 model="gpt-4",
                 messages=[
@@ -119,7 +132,8 @@ class OpenAIIVRConverter:
                 temperature=0.1,
                 max_tokens=4000
             )
-            logger.debug("Received response from OpenAI")
+            logger.info("Received response from OpenAI")
+            logger.debug(f"Response status: {response.model_dump()}")
 
             # Extract and clean the response
             ivr_code = response.choices[0].message.content.strip()
@@ -130,20 +144,26 @@ class OpenAIIVRConverter:
                 start_idx = ivr_code.find("module.exports = [")
                 end_idx = ivr_code.rfind("];") + 2
                 ivr_code = ivr_code[start_idx:end_idx]
-                logger.debug("Successfully extracted code section")
+                logger.info("Successfully extracted code section")
             else:
                 logger.warning("Could not find module.exports section in response")
+                logger.debug(f"Full response content: {ivr_code}")
+                raise ValueError("Invalid response format from OpenAI")
 
             # Validate the generated code
             try:
                 self._validate_ivr_code(ivr_code)
-                logger.debug("IVR code validation passed")
+                logger.info("IVR code validation passed")
             except ValueError as ve:
                 logger.error(f"IVR code validation failed: {str(ve)}")
                 raise
 
             return ivr_code
 
+        except OpenAIError as oe:
+            logger.error(f"OpenAI API error: {str(oe)}")
+            logger.debug(f"OpenAI error details: {traceback.format_exc()}")
+            raise
         except Exception as e:
             logger.error(f"IVR conversion failed: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
@@ -205,7 +225,9 @@ class OpenAIIVRConverter:
             if missing_nodes:
                 raise ValueError(f"Missing required nodes: {missing_nodes}")
 
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as je:
+            logger.error(f"JSON decode error: {str(je)}")
+            logger.debug(f"Invalid JSON content: {ivr_code}")
             raise ValueError("Generated code is not valid JSON")
         except Exception as e:
             raise ValueError(f"Validation error: {str(e)}")
@@ -213,7 +235,7 @@ class OpenAIIVRConverter:
 def convert_mermaid_to_ivr(mermaid_code: str, api_key: str) -> str:
     """Wrapper function for Mermaid to IVR conversion"""
     try:
-        logger.debug("Starting conversion with wrapper function")
+        logger.info("Starting conversion with wrapper function")
         converter = OpenAIIVRConverter(api_key)
         return converter.convert_to_ivr(mermaid_code)
     except Exception as e:
