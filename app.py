@@ -68,6 +68,30 @@ def format_ivr_code(ivr_nodes: list, format_type: str = 'javascript') -> str:
     else:
         raise ValueError(f"Unsupported format: {format_type}")
 
+def render_mermaid_safely(mermaid_text: str):
+    """
+    Safely render Mermaid diagram with multiple fallback strategies
+    """
+    try:
+        # Try standard Mermaid rendering
+        st_mermaid.st_mermaid(mermaid_text)
+    except Exception as standard_error:
+        st.warning("Standard Mermaid rendering failed. Attempting alternative rendering.")
+        
+        try:
+            # Try rendering with explicit configuration
+            st.markdown(f"""
+            <div class="mermaid">
+            {mermaid_text}
+            </div>
+            <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+            <script>mermaid.initialize({{startOnLoad:true}});</script>
+            """, unsafe_allow_html=True)
+        except Exception as alt_error:
+            st.error(f"Mermaid rendering failed. Please check your diagram syntax.")
+            st.code(mermaid_text, language="mermaid")
+            st.error(f"Rendering Errors:\n1. {standard_error}\n2. {alt_error}")
+
 def main():
     st.set_page_config(
         page_title="Mermaid-to-IVR Converter",
@@ -227,11 +251,7 @@ def main():
         st.subheader("👁️ Preview")
         try:
             if mermaid_text:
-                try:
-                    st_mermaid.st_mermaid(mermaid_text)
-                except Exception as preview_error:
-                    st.error(f"Mermaid Preview Error: {preview_error}")
-                    st.code(mermaid_text, language="mermaid")
+                render_mermaid_safely(mermaid_text)
         except Exception as e:
             st.error(f"Preview Error: {e}")
 

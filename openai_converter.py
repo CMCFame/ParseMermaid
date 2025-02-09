@@ -91,34 +91,39 @@ class FlowchartConverter:
                         "role": "system",
                         "content": """You are an expert Mermaid diagram generator specializing in complex flowchart conversions. 
 
-STRICT MERMAID SYNTAX RULES:
-1. Always start with 'flowchart TD' for top-down flow
-2. Use unique node IDs (A1, B1, C1, etc.)
-3. Node text formatting:
-   - Use \n for multi-line text
+STRICT MERMAID SYNTAX REQUIREMENTS:
+1. Use 'flowchart TD' for top-down flow
+2. Node IDs: Use A1, B1, etc. for unique identification
+3. Text Formatting:
+   - Use <br> for line breaks
    - Escape special characters
    - Enclose text in square brackets with quotes
-4. Connection syntax:
-   - Use --> for standard connections
-   - Use -->| | for labeled connections
-   - Handle retry and alternative paths
-5. Decision nodes use {} syntax
-6. Ensure all paths are connected
-7. Preserve all original flow details
-8. Handle nested conditions and multiple paths
-9. Use escape characters for parentheses and special symbols
+4. Connection Syntax:
+   - Standard connection: -->
+   - Labeled connection: -->| label |
+   - Handle all paths, including retry and error flows
+5. Decision Nodes:
+   - Use {} for decision/diamond nodes
+6. Preserve Complete Flow:
+   - Capture all decision points
+   - Include all original messaging
+   - Maintain logical flow
+7. Error Handling:
+   - Show retry paths
+   - Handle invalid inputs
+8. Readability:
+   - Clear, descriptive node labels
+   - Logical, intuitive flow
 
-ADDITIONAL GUIDELINES:
-- Maintain original diagram's logical flow
-- Include all decision points
-- Preserve original messaging
-- Add retry and error handling paths
-- Use descriptive, clear node labels"""
+CRITICAL GUIDELINES:
+- 100% Accuracy to Source Diagram
+- No Information Loss
+- Exact Path Replication"""
                     },
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "Convert this complex call flow diagram to precise Mermaid syntax. Ensure every detail is captured accurately."},
+                            {"type": "text", "text": "Convert this complex call flow diagram to precise Mermaid syntax. Capture EVERY detail accurately."},
                             {
                                 "type": "image_url", 
                                 "image_url": {
@@ -129,7 +134,7 @@ ADDITIONAL GUIDELINES:
                     }
                 ],
                 max_tokens=4096,
-                temperature=0.1  # More deterministic
+                temperature=0.1  # Highly deterministic
             )
             
             # Extract Mermaid code
@@ -138,6 +143,7 @@ ADDITIONAL GUIDELINES:
             # Clean up potential code block markers
             mermaid_text = re.sub(r'^```(mermaid)?|```$', '', mermaid_text, flags=re.MULTILINE).strip()
             
+            # Ensure starts with flowchart definition
             return mermaid_text if mermaid_text.startswith('flowchart') else f'flowchart TD\n{mermaid_text}'
         
         except Exception as e:
