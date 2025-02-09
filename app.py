@@ -82,6 +82,8 @@ def main():
         validate_syntax = st.checkbox("Validate Diagram", value=True)
         show_debug_info = st.checkbox("Show Detailed Conversion Info", value=False)
     
+    mermaid_text = ""
+    
     if conversion_method == "Mermaid Editor":
         selected_example = st.selectbox("Load Example Flow", ["Custom"] + list(DEFAULT_FLOWS.keys()))
         mermaid_text = st.text_area(
@@ -104,37 +106,23 @@ def main():
                 except Exception as e:
                     st.error(f"Error previewing image: {e}")
         
-        mermaid_text = ""
         if uploaded_file and openai_api_key and st.button("🔄 Convert Image to Mermaid"):
             try:
-                mermaid_text = process_flow_diagram(uploaded_file.name, openai_api_key)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_file_path = tmp_file.name
+                
+                mermaid_text = process_flow_diagram(tmp_file_path, openai_api_key)
                 st.subheader("Converted Mermaid Diagram")
                 st.code(mermaid_text, language="mermaid")
                 st.success("Image successfully converted to Mermaid diagram!")
+                os.unlink(tmp_file_path)
             except Exception as e:
                 st.error(f"Conversion Error: {e}")
-                mermaid_text = ""
     
     if mermaid_text:
-        if validate_syntax:
-            validation_result = validate_mermaid(mermaid_text)
-            if validation_result:
-                st.error(validation_result)
-                return
-        
-        parsed_graph = parse_mermaid(mermaid_text)
-        ivr_nodes = graph_to_ivr(parsed_graph)
-        
-        formatted_ivr_code = format_ivr_code(ivr_nodes, export_format.lower())
-        st.subheader("Generated IVR Code")
-        st.code(formatted_ivr_code, language=export_format.lower())
-        
-        temp_file_path = save_temp_file(formatted_ivr_code, f".{export_format.lower()}")
-        st.download_button("📥 Download IVR Code", data=formatted_ivr_code, file_name=os.path.basename(temp_file_path))
+        st.subheader("👁️ Preview Mermaid Diagram")
+        render_mermaid_safely(mermaid_text)
     
-    with st.expander("👁️ Preview Mermaid Diagram"):
-        if mermaid_text:
-            render_mermaid_safely(mermaid_text)
-
 if __name__ == "__main__":
     main()
