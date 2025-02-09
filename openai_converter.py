@@ -75,10 +75,10 @@ You are an expert Mermaid diagram generator specializing in complex flowchart co
 
 STRICT FORMAT:
 1. Always start with 'flowchart TD'
-2. Enclose node text in square brackets: ["Node Text"]
-3. Use curly brackets {} for decision nodes
-4. Ensure all edges are properly formatted
-5. Remove unnecessary line breaks and escape sequences
+2. Enclose node text in single square brackets: ["Node Text"]
+3. Use curly brackets {} for decision nodes only (not normal text)
+4. Remove incorrect {if}, {If}, or similar markers from text
+5. Ensure proper edge formatting without extra spaces or misplaced symbols
                         """
                     },
                     {
@@ -108,9 +108,9 @@ STRICT FORMAT:
     def _format_mermaid_code(self, mermaid_text: str) -> str:
         mermaid_text = re.sub(r'```mermaid\\n(.*?)\\n```', r'\1', mermaid_text, flags=re.DOTALL)
         mermaid_text = re.sub(r'\\n', '\\n', mermaid_text)  # Ensure proper line breaks
-        mermaid_text = re.sub(r'\b(if|decision|question)\b', r'{\1}', mermaid_text, flags=re.IGNORECASE)
-        mermaid_text = re.sub(r'\[([^\]]+)\]', r'["\1"]', mermaid_text)  # Ensure square brackets
-        mermaid_text = re.sub(r'\{([^{}]+)\}', r'{\1}', mermaid_text)  # Fix decision nodes
+        mermaid_text = re.sub(r'\b(if|decision|question)\b', r'\1', mermaid_text, flags=re.IGNORECASE)  # Remove invalid {if}
+        mermaid_text = re.sub(r'\[([^\]]+)\]', r'["\1"]', mermaid_text)  # Ensure single brackets, not double
+        mermaid_text = re.sub(r'\{([^{}]+)\}', r'{\1}', mermaid_text)  # Keep only valid decision nodes
         mermaid_text = re.sub(r'-->\|([^|]+)\|', r'-->|\1|', mermaid_text)  # Fix edge formatting
         return mermaid_text
 
