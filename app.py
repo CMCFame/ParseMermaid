@@ -10,10 +10,15 @@ import tempfile
 import os
 from PIL import Image
 import traceback
+import logging
 
 from parse_mermaid import parse_mermaid, MermaidParser
 from openai_ivr_converter import convert_mermaid_to_ivr
 from openai_converter import process_flow_diagram
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Page configuration
 st.set_page_config(
@@ -78,7 +83,7 @@ def format_ivr_code(ivr_code: str, format_type: str = 'javascript') -> str:
         else:
             raise ValueError(f"Unsupported format: {format_type}")
     except Exception as e:
-        st.error(f"Format Error: {str(e)}")
+        logger.error(f"Format Error: {str(e)}")
         return ivr_code
 
 def show_code_diff(original: str, converted: str):
@@ -217,6 +222,12 @@ def main():
 
         with st.spinner("Converting to IVR..."):
             try:
+                # Debug info
+                if show_debug:
+                    st.write("Debug Information:")
+                    st.write(f"API Key present: {bool(openai_api_key)}")
+                    st.write("Starting conversion process")
+
                 # Validate diagram if requested
                 if validate_syntax:
                     error = validate_mermaid(mermaid_text)
@@ -225,7 +236,16 @@ def main():
                         return
 
                 # Convert to IVR using OpenAI
-                ivr_code = convert_mermaid_to_ivr(mermaid_text, openai_api_key)
+                try:
+                    ivr_code = convert_mermaid_to_ivr(mermaid_text, openai_api_key)
+                    if show_debug:
+                        st.write("Conversion completed")
+                except Exception as e:
+                    st.error(f"OpenAI conversion failed: {str(e)}")
+                    if show_debug:
+                        st.exception(e)
+                    return
+
                 st.session_state.last_ivr_code = ivr_code
                 
                 # Format output
