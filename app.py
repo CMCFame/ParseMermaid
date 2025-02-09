@@ -35,20 +35,7 @@ DEFAULT_FLOWS = {
     A -->|"7 - not home"| D["Employee Not Home"]
     A -->|"3 - need more time"| C
     A -->|"retry logic"| A
-    B -->|"yes"| E["Enter Employee PIN"]''',
-    
-    "PIN Change": '''flowchart TD
-    A["Enter PIN"] --> B{"Valid PIN?"}
-    B -->|"No"| C["Invalid Entry"]
-    B -->|"Yes"| D["PIN Changed"]
-    C --> A''',
-    
-    "Transfer Flow": '''flowchart TD
-    A["Transfer Request"] --> B{"Transfer Available?"}
-    B -->|"Yes"| C["Connect"]
-    B -->|"No"| D["Failed"]
-    C --> E["End"]
-    D --> E'''
+    B -->|"yes"| E["Enter Employee PIN"]'''
 }
 
 # Custom CSS to hide deprecation warning and improve UI
@@ -63,6 +50,19 @@ CUSTOM_CSS = """
     }
     .uploadedFile {
         max-width: 100%;
+    }
+    .comparison-view {
+        display: flex;
+        gap: 1rem;
+    }
+    .maximize-button {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 1000;
+    }
+    .element-container {
+        position: relative;
     }
 </style>
 """
@@ -86,51 +86,36 @@ def validate_mermaid(mermaid_text: str) -> Optional[str]:
     except Exception as e:
         return f"Diagram Validation Error: {str(e)}"
 
-def format_ivr_code(ivr_code: str, format_type: str = 'javascript') -> str:
-    """Format IVR code according to selected output format"""
-    try:
-        if format_type == 'javascript':
-            return ivr_code
-        
-        # Extract JSON array from module.exports
-        json_str = ivr_code[16:-1].strip()  # Remove "module.exports = " and ";"
-        data = json.loads(json_str)
-        
-        if format_type == 'json':
-            return json.dumps(data, indent=2)
-        elif format_type == 'yaml':
-            return yaml.dump(data, allow_unicode=True)
-        else:
-            raise ValueError(f"Unsupported format: {format_type}")
-    except Exception as e:
-        logger.error(f"Format Error: {str(e)}")
-        return ivr_code
-
-def render_mermaid_safely(mermaid_text: str):
-    """Safely render Mermaid diagram with error handling"""
+def render_mermaid_safely(mermaid_text: str, height: int = 300):
+    """Safely render Mermaid diagram with error handling and maximize option"""
     try:
         with st.container():
-            st_mermaid.st_mermaid(mermaid_text, height=300)
+            st_mermaid.st_mermaid(mermaid_text, height=height)
+            
+            # Add maximize button
+            if st.button("🔍 Maximize", key=f"maximize_{hash(mermaid_text)}"):
+                with st.expander("Maximized View", expanded=True):
+                    st_mermaid.st_mermaid(mermaid_text, height=600)
     except Exception as e:
         st.error(f"Preview Error: {str(e)}")
         st.code(mermaid_text, language="mermaid")
 
-def show_code_diff(original: str, converted: str):
-    """Show comparison of original and converted code"""
+def show_comparison_view(image: Image.Image, mermaid_text: str):
+    """Show side-by-side comparison of image and diagram"""
     col1, col2 = st.columns(2)
+    
     with col1:
-        st.subheader("Original Mermaid")
-        st.code(original, language="mermaid")
-        st.subheader("Preview")
-        render_mermaid_safely(original)
+        st.subheader("Original Image")
+        st.image(image, caption="Uploaded Flowchart", use_column_width=True)
+    
     with col2:
-        st.subheader("Generated IVR Code")
-        st.code(converted, language="javascript")
+        st.subheader("Diagram Preview")
+        render_mermaid_safely(mermaid_text)
 
 def process_uploaded_image(uploaded_file) -> Image.Image:
     """Process uploaded image with size constraints"""
     image = Image.open(uploaded_file)
-    max_width = 600
+    max_width = 800  # Increased max width for better visibility
     ratio = max_width / image.size[0]
     new_size = (max_width, int(image.size[1] * ratio))
     image.thumbnail(new_size, Image.Resampling.LANCZOS)
@@ -149,8 +134,10 @@ def main():
     # Initialize session state
     if 'mermaid_code' not in st.session_state:
         st.session_state.mermaid_code = None
-    if 'ivr_code' not in st.session_state:
-        st.session_state.ivr_code = None
+    if 'uploaded_image' not in st.session_state:
+        st.session_state.uploaded_image = None
+    if 'comparison_view' not in st.session_state:
+        st.session_state.comparison_view = False
 
     # Sidebar configuration
     with st.sidebar:
@@ -159,13 +146,7 @@ def main():
         # Input method selection
         conversion_method = st.radio(
             "Input Method",
-            ["Mermaid Editor", "Image Upload"]
-        )
-        
-        # Export format selection
-        export_format = st.radio(
-            "Export Format",
-            ["JavaScript", "JSON", "YAML"]
+            ["Image Upload", "Mermaid Editor"]
         )
         
         # Advanced settings
@@ -182,86 +163,75 @@ def main():
         )
 
     # Main content area
-    if conversion_method == "Mermaid Editor":
-        # Example flow selection
-        selected_example = st.selectbox(
-            "Load Example Flow",
-            ["Custom"] + list(DEFAULT_FLOWS.keys())
+    if conversion_method == "Image Upload":
+        uploaded_file = st.file_uploader(
+            "Upload Flowchart",
+            type=['pdf', 'png', 'jpg', 'jpeg']
         )
         
-        # Mermaid editor
-        if selected_example != "Custom":
+        if uploaded_file:
+            try:
+                image = process_uploaded_image(uploaded_file)
+                st.session_state.uploaded_image = image
+                
+                # Show comparison view if we have both image and diagram
+                if st.session_state.mermaid_code:
+                    show_comparison_view(image, st.session_state.mermaid_code)
+                else:
+                    st.image(image, caption="Uploaded Flowchart", use_column_width=True)
+                
+                # Convert image to Mermaid button
+                if st.button("🔄 Convert Image to Mermaid"):
+                    with st.spinner("Converting image..."):
+                        try:
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
+                                tmp_file.write(uploaded_file.getvalue())
+                                mermaid_text = process_flow_diagram(tmp_file.name, openai_api_key)
+                                st.session_state.mermaid_code = mermaid_text
+                            
+                            st.success("Image converted successfully!")
+                            st.session_state.comparison_view = True
+                            
+                        except Exception as e:
+                            st.error(f"Conversion Error: {str(e)}")
+                            if show_debug:
+                                st.exception(e)
+                        finally:
+                            if 'tmp_file' in locals():
+                                os.unlink(tmp_file.name)
+            except Exception as e:
+                st.error(f"Error loading image: {str(e)}")
+    
+    else:  # Mermaid Editor
+        if st.session_state.mermaid_code:
             mermaid_text = st.text_area(
                 "Mermaid Diagram",
-                DEFAULT_FLOWS[selected_example],
+                st.session_state.mermaid_code,
                 height=300
             )
         else:
             mermaid_text = st.text_area(
                 "Mermaid Diagram",
-                st.session_state.mermaid_code or "",
+                "",
                 height=300
             )
         
         st.session_state.mermaid_code = mermaid_text
 
-    else:  # Image Upload
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            uploaded_file = st.file_uploader(
-                "Upload Flowchart",
-                type=['pdf', 'png', 'jpg', 'jpeg']
-            )
-        
-        with col2:
-            if uploaded_file:
-                try:
-                    image = process_uploaded_image(uploaded_file)
-                    st.image(image, caption="Uploaded Flowchart", use_column_width=True)
-                except Exception as e:
-                    st.error(f"Error loading image: {str(e)}")
-        
-        # Convert image to Mermaid
-        if uploaded_file and openai_api_key:
-            if st.button("🔄 Convert Image to Mermaid"):
-                with st.spinner("Converting image..."):
-                    try:
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
-                            tmp_file.write(uploaded_file.getvalue())
-                            mermaid_text = process_flow_diagram(tmp_file.name, openai_api_key)
-                            st.session_state.mermaid_code = mermaid_text
-                        
-                        st.success("Image converted successfully!")
-                        st.subheader("Generated Mermaid Code")
-                        st.code(mermaid_text, language="mermaid")
-                        
-                    except Exception as e:
-                        st.error(f"Conversion Error: {str(e)}")
-                        if show_debug:
-                            st.exception(e)
-                    finally:
-                        if 'tmp_file' in locals():
-                            os.unlink(tmp_file.name)
-
-    # Always show preview if we have Mermaid code
+    # Show diagram preview
     if st.session_state.mermaid_code:
-        st.subheader("👁️ Preview")
-        render_mermaid_safely(st.session_state.mermaid_code)
+        if not st.session_state.comparison_view:
+            st.subheader("👁️ Preview")
+            render_mermaid_safely(st.session_state.mermaid_code)
 
-    # Convert button
-    if st.button("🔄 Convert to IVR"):
+    # Convert to IVR button
+    if st.session_state.mermaid_code and st.button("🔄 Convert to IVR"):
         if not openai_api_key:
             st.error("Please provide an OpenAI API key in the sidebar.")
             return
 
         with st.spinner("Converting to IVR..."):
             try:
-                # Keep displaying the Mermaid preview
-                if st.session_state.mermaid_code:
-                    st.subheader("👁️ Current Diagram")
-                    render_mermaid_safely(st.session_state.mermaid_code)
-
                 # Validate diagram if requested
                 if validate_syntax:
                     error = validate_mermaid(st.session_state.mermaid_code)
@@ -271,14 +241,10 @@ def main():
 
                 # Convert to IVR
                 ivr_code = convert_mermaid_to_ivr(st.session_state.mermaid_code, openai_api_key)
-                st.session_state.ivr_code = ivr_code
                 
-                # Format output
-                output = format_ivr_code(ivr_code, export_format.lower())
-
                 # Show result
                 st.subheader("📤 Generated IVR Configuration")
-                st.code(output, language=export_format.lower())
+                st.code(ivr_code, language="javascript")
 
                 # Debug information
                 if show_debug:
@@ -293,18 +259,15 @@ def main():
                             st.error(f"Parse Error: {str(e)}")
 
                 # Download option
-                tmp_file = save_temp_file(output)
+                tmp_file = save_temp_file(ivr_code)
                 with open(tmp_file, 'rb') as f:
                     st.download_button(
                         label="⬇️ Download Configuration",
                         data=f,
-                        file_name=f"ivr_flow.{export_format.lower()}",
+                        file_name="ivr_flow.js",
                         mime="text/plain"
                     )
                 os.unlink(tmp_file)
-
-                # Show differences (ensures both codes are visible)
-                show_code_diff(st.session_state.mermaid_code, output)
 
             except Exception as e:
                 st.error(f"Conversion Error: {str(e)}")
