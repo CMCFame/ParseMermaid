@@ -1,5 +1,5 @@
 """
-Streamlit app for IVR flow conversion with enhanced OpenAI integration
+Streamlit app for IVR flow conversion with enhanced UI
 """
 import streamlit as st
 import streamlit_mermaid as st_mermaid
@@ -10,16 +10,21 @@ import tempfile
 import os
 from PIL import Image
 import traceback
-
+import logging
 from parse_mermaid import parse_mermaid, MermaidParser
 from openai_ivr_converter import convert_mermaid_to_ivr
 from openai_converter import process_flow_diagram
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
 # Page configuration
 st.set_page_config(
-    page_title="Mermaid-to-IVR Converter",
+    page_title="IVR Flow Designer",
     page_icon="🔄",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 # Constants and examples
@@ -46,11 +51,31 @@ DEFAULT_FLOWS = {
     D --> E'''
 }
 
+# Custom CSS to hide deprecation warning and improve UI
+CUSTOM_CSS = """
+<style>
+    .stAlert { display: none; }
+    .stTextArea>div>div>textarea {
+        font-family: monospace;
+    }
+    .main .block-container {
+        padding-top: 2rem;
+    }
+    .uploadedFile {
+        max-width: 100%;
+    }
+</style>
+"""
+
 def save_temp_file(content: str, suffix: str = '.js') -> str:
     """Save content to a temporary file and return the path"""
-    with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as f:
-        f.write(content)
-        return f.name
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as f:
+            f.write(content)
+            return f.name
+    except Exception as e:
+        logger.error(f"Error saving temporary file: {str(e)}")
+        raise
 
 def validate_mermaid(mermaid_text: str) -> Optional[str]:
     """Validate Mermaid diagram syntax"""
@@ -78,8 +103,17 @@ def format_ivr_code(ivr_code: str, format_type: str = 'javascript') -> str:
         else:
             raise ValueError(f"Unsupported format: {format_type}")
     except Exception as e:
-        st.error(f"Format Error: {str(e)}")
+        logger.error(f"Format Error: {str(e)}")
         return ivr_code
+
+def render_mermaid_safely(mermaid_text: str):
+    """Safely render Mermaid diagram with error handling"""
+    try:
+        with st.container():
+            st_mermaid.st_mermaid(mermaid_text, height=300)
+    except Exception as e:
+        st.error(f"Preview Error: {str(e)}")
+        st.code(mermaid_text, language="mermaid")
 
 def show_code_diff(original: str, converted: str):
     """Show comparison of original and converted code"""
@@ -87,30 +121,36 @@ def show_code_diff(original: str, converted: str):
     with col1:
         st.subheader("Original Mermaid")
         st.code(original, language="mermaid")
+        st.subheader("Preview")
+        render_mermaid_safely(original)
     with col2:
         st.subheader("Generated IVR Code")
         st.code(converted, language="javascript")
 
-def render_mermaid_safely(mermaid_text: str):
-    """Safely render Mermaid diagram with error handling"""
-    try:
-        st_mermaid.st_mermaid(mermaid_text, height=400)
-    except Exception as e:
-        st.error(f"Preview Error: {str(e)}")
-        st.code(mermaid_text, language="mermaid")
+def process_uploaded_image(uploaded_file) -> Image.Image:
+    """Process uploaded image with size constraints"""
+    image = Image.open(uploaded_file)
+    max_width = 600
+    ratio = max_width / image.size[0]
+    new_size = (max_width, int(image.size[1] * ratio))
+    image.thumbnail(new_size, Image.Resampling.LANCZOS)
+    return image
 
 def main():
-    st.title("🔄 Mermaid-to-IVR Converter")
+    # Apply custom CSS
+    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+    
+    st.title("🔄 IVR Flow Designer")
     st.markdown("""
     This tool converts flow diagrams into IVR configurations.
     Supports multiple input methods and formats.
     """)
 
     # Initialize session state
-    if 'last_mermaid_code' not in st.session_state:
-        st.session_state.last_mermaid_code = None
-    if 'last_ivr_code' not in st.session_state:
-        st.session_state.last_ivr_code = None
+    if 'mermaid_code' not in st.session_state:
+        st.session_state.mermaid_code = None
+    if 'ivr_code' not in st.session_state:
+        st.session_state.ivr_code = None
 
     # Sidebar configuration
     with st.sidebar:
@@ -129,9 +169,9 @@ def main():
         )
         
         # Advanced settings
-        st.subheader("Advanced Settings")
-        validate_syntax = st.checkbox("Validate Diagram", value=True)
-        show_debug = st.checkbox("Show Debug Info", value=False)
+        with st.expander("Advanced Settings"):
+            validate_syntax = st.checkbox("Validate Diagram", value=True)
+            show_debug = st.checkbox("Show Debug Info", value=False)
 
         # API Configuration
         st.subheader("API Configuration")
@@ -154,20 +194,21 @@ def main():
             mermaid_text = st.text_area(
                 "Mermaid Diagram",
                 DEFAULT_FLOWS[selected_example],
-                height=400
+                height=300
             )
         else:
             mermaid_text = st.text_area(
                 "Mermaid Diagram",
-                st.session_state.last_mermaid_code or "",
-                height=400
+                st.session_state.mermaid_code or "",
+                height=300
             )
+        
+        st.session_state.mermaid_code = mermaid_text
 
     else:  # Image Upload
-        col1, col2 = st.columns(2)
+        col1, col2 = st.columns([1, 1])
         
         with col1:
-            # File uploader
             uploaded_file = st.file_uploader(
                 "Upload Flowchart",
                 type=['pdf', 'png', 'jpg', 'jpeg']
@@ -176,13 +217,12 @@ def main():
         with col2:
             if uploaded_file:
                 try:
-                    image = Image.open(uploaded_file)
+                    image = process_uploaded_image(uploaded_file)
                     st.image(image, caption="Uploaded Flowchart", use_column_width=True)
                 except Exception as e:
                     st.error(f"Error loading image: {str(e)}")
         
         # Convert image to Mermaid
-        mermaid_text = ""
         if uploaded_file and openai_api_key:
             if st.button("🔄 Convert Image to Mermaid"):
                 with st.spinner("Converting image..."):
@@ -190,7 +230,7 @@ def main():
                         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
                             tmp_file.write(uploaded_file.getvalue())
                             mermaid_text = process_flow_diagram(tmp_file.name, openai_api_key)
-                            st.session_state.last_mermaid_code = mermaid_text
+                            st.session_state.mermaid_code = mermaid_text
                         
                         st.success("Image converted successfully!")
                         st.subheader("Generated Mermaid Code")
@@ -204,10 +244,10 @@ def main():
                         if 'tmp_file' in locals():
                             os.unlink(tmp_file.name)
 
-    # Preview area
-    if mermaid_text:
+    # Always show preview if we have Mermaid code
+    if st.session_state.mermaid_code:
         st.subheader("👁️ Preview")
-        render_mermaid_safely(mermaid_text)
+        render_mermaid_safely(st.session_state.mermaid_code)
 
     # Convert button
     if st.button("🔄 Convert to IVR"):
@@ -217,16 +257,21 @@ def main():
 
         with st.spinner("Converting to IVR..."):
             try:
+                # Keep displaying the Mermaid preview
+                if st.session_state.mermaid_code:
+                    st.subheader("👁️ Current Diagram")
+                    render_mermaid_safely(st.session_state.mermaid_code)
+
                 # Validate diagram if requested
                 if validate_syntax:
-                    error = validate_mermaid(mermaid_text)
+                    error = validate_mermaid(st.session_state.mermaid_code)
                     if error:
                         st.error(error)
                         return
 
-                # Convert to IVR using OpenAI
-                ivr_code = convert_mermaid_to_ivr(mermaid_text, openai_api_key)
-                st.session_state.last_ivr_code = ivr_code
+                # Convert to IVR
+                ivr_code = convert_mermaid_to_ivr(st.session_state.mermaid_code, openai_api_key)
+                st.session_state.ivr_code = ivr_code
                 
                 # Format output
                 output = format_ivr_code(ivr_code, export_format.lower())
@@ -234,7 +279,7 @@ def main():
                 # Show result
                 st.subheader("📤 Generated IVR Configuration")
                 st.code(output, language=export_format.lower())
-                
+
                 # Debug information
                 if show_debug:
                     with st.expander("Debug Information"):
@@ -258,8 +303,8 @@ def main():
                     )
                 os.unlink(tmp_file)
 
-                # Show differences
-                show_code_diff(mermaid_text, output)
+                # Show differences (ensures both codes are visible)
+                show_code_diff(st.session_state.mermaid_code, output)
 
             except Exception as e:
                 st.error(f"Conversion Error: {str(e)}")
