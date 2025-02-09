@@ -1,84 +1,45 @@
 """
-Complete IVR transformation module with debugging
-Author: DevTeam
-Version: 2.0
+Enhanced IVR transformation module with exact node matching
 """
 import re
 import logging
 from typing import Dict, List, Optional, Any, Set
-from dataclasses import dataclass, field
-from enum import Enum, auto
+from dataclasses import dataclass
 from parse_mermaid import Node, Edge, NodeType
 
-# Set up logging
+# Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
-
-class NodeCategory(Enum):
-    """Categories of IVR nodes"""
-    WELCOME = auto()
-    MENU = auto()
-    INPUT = auto()
-    DECISION = auto()
-    RESPONSE = auto()
-    MESSAGE = auto()
-    HANDLER = auto()
-
-@dataclass
-class AudioPrompt:
-    """Audio prompt configuration"""
-    id: str
-    description: str
-    category: NodeCategory
-    default_timeout: int = 5
 
 class AudioPrompts:
     """Audio prompt mapping"""
     # System prompts
-    WELCOME = "1001"        # Welcome message
-    PIN_ENTRY = "1008"      # PIN entry prompt
-    INVALID = "1009"        # Invalid input
-    TIMEOUT = "1010"        # Input timeout
-    ERROR = "1351"          # General error message
-    
-    # Menu and input prompts
-    MENU = "1677"           # Main menu options
-    TRANSFER = "1645"       # Transfer request
+    WELCOME = "1001"      # Welcome message
+    PIN_ENTRY = "1008"    # PIN entry request
+    INVALID = "1009"      # Invalid input
+    TIMEOUT = "1010"      # Input timeout
+    ERROR = "1351"        # General error
     
     # Response prompts
-    ACCEPT = "1167"         # Accept response
-    DECLINE = "1021"        # Decline response
-    QUALIFIED = "1266"      # Qualified no
-    GOODBYE = "1029"        # Goodbye message
+    ACCEPT = "1167"       # Accept response
+    DECLINE = "1021"      # Decline response
+    QUALIFIED = "1266"    # Qualified no
+    GOODBYE = "1029"      # Goodbye message
     
     # Callout prompts
-    CALLOUT = "1274"        # Callout information
-    REASON = "1019"        # Callout reason
-    LOCATION = "1232"      # Location information
-    WAIT = "1265"          # Wait message
-    NOT_HOME = "1017"      # Not home message
-    AVAILABLE = "1316"     # Availability check
-
-@dataclass
-class IVRNode:
-    """IVR node configuration"""
-    label: str
-    log: str
-    prompt_ids: List[str]
-    category: NodeCategory
-    digit_collection: Optional[Dict] = None
-    branch_logic: Optional[Dict] = None
-    goto: Optional[str] = None
-    retries: int = 3
-    timeout: int = 5
+    CALLOUT = "1274"      # Callout information
+    REASON = "1019"       # Callout reason
+    LOCATION = "1232"     # Location information
+    WAIT = "1265"         # Wait message
+    NOT_HOME = "1017"     # Not home message
+    AVAILABLE = "1316"    # Availability check
 
 class IVRTransformer:
-    """IVR transformation engine with debugging"""
+    """Enhanced IVR transformation engine"""
     
     def __init__(self):
         self.processed_nodes: Set[str] = set()
         self.node_map: Dict[str, Dict] = {}
-        self.debug = True
 
     def transform(self, graph: Dict) -> List[Dict[str, Any]]:
         """Transform Mermaid graph to IVR configuration"""
@@ -90,9 +51,13 @@ class IVRTransformer:
             # Build node relationships
             self.node_map = self._build_node_map(nodes, edges)
             
-            # Process each node
+            # Process nodes in order of appearance
             for node_id, node in nodes.items():
                 logger.debug(f"Processing node {node_id}: {node.raw_text}")
+                
+                # Skip subgraph nodes (Header and Footer)
+                if hasattr(node, 'subgraph') and node.subgraph:
+                    continue
                 
                 if node_id not in self.processed_nodes:
                     node_config = self._process_node(node, edges)
@@ -101,8 +66,9 @@ class IVRTransformer:
                         self.processed_nodes.add(node_id)
                         logger.debug(f"Added node configuration: {node_config['label']}")
             
-            # Add standard handlers
-            ivr_nodes.extend(self._create_standard_handlers())
+            # Add standard handlers if not already present
+            if not any(node.get('label') == 'Problems' for node in ivr_nodes):
+                ivr_nodes.append(self._create_error_handler())
             
             return ivr_nodes
             
@@ -125,18 +91,17 @@ class IVRTransformer:
         return node_map
 
     def _process_node(self, node: Node, edges: List[Edge]) -> Optional[Dict]:
-        """Process individual node with detailed error tracking"""
+        """Process individual node with improved text matching"""
         try:
-            text = node.raw_text.lower()
+            text = node.raw_text
             node_config = None
-            
-            logger.debug(f"Processing text: {text}")
+            logger.debug(f"Processing node text: {text}")
 
-            # Welcome/Initial node
-            if any(x in text for x in ["welcome", "this is an electric callout"]):
+            # Match exact node patterns from your diagram
+            if "This is an electric callout" in text and "Press" in text:
                 node_config = {
                     "label": "Welcome",
-                    "log": node.raw_text,
+                    "log": text,
                     "playPrompt": [f"callflow:{AudioPrompts.WELCOME}"],
                     "getDigits": {
                         "numDigits": 1,
@@ -152,65 +117,78 @@ class IVRTransformer:
                         "9": "Welcome"
                     }
                 }
-            
-            # PIN Entry
-            elif "pin" in text:
+
+            elif "30-second message" in text:
                 node_config = {
-                    "label": "EnterPin",
-                    "log": node.raw_text,
-                    "playPrompt": [f"callflow:{AudioPrompts.PIN_ENTRY}"],
+                    "label": "NeedMoreTime",
+                    "log": text,
+                    "playPrompt": [f"callflow:{AudioPrompts.WAIT}"],
                     "getDigits": {
-                        "numDigits": 4,
-                        "maxTries": 3,
-                        "terminator": "#",
-                        "errorPrompt": f"callflow:{AudioPrompts.INVALID}",
-                        "timeoutPrompt": f"callflow:{AudioPrompts.TIMEOUT}"
+                        "numDigits": 1,
+                        "maxTries": 1,
+                        "errorPrompt": f"callflow:{AudioPrompts.INVALID}"
                     },
-                    "branch": {
-                        "valid": "ElectricCallout",
-                        "invalid": "InvalidPin"
-                    }
+                    "goto": "Welcome"
                 }
-            
-            # Electric Callout
-            elif "electric callout" in text:
+
+            elif "Employee Not Home" in text:
+                node_config = {
+                    "label": "NotHome",
+                    "log": text,
+                    "playPrompt": [f"callflow:{AudioPrompts.NOT_HOME}"],
+                    "goto": "Goodbye"
+                }
+
+            elif "Invalid Entry" in text:
+                node_config = {
+                    "label": "InvalidEntry",
+                    "log": text,
+                    "playPrompt": [f"callflow:{AudioPrompts.INVALID}"],
+                    "goto": "Welcome"
+                }
+
+            elif "Electric Callout" in text and "This is an electric callout" in text:
                 node_config = {
                     "label": "ElectricCallout",
-                    "log": node.raw_text,
+                    "log": text,
                     "playPrompt": [f"callflow:{AudioPrompts.CALLOUT}"],
                     "goto": "CalloutReason"
                 }
-            
-            # Callout Reason
-            elif "callout reason" in text:
+
+            elif "Callout Reason" in text:
                 node_config = {
                     "label": "CalloutReason",
-                    "log": node.raw_text,
+                    "log": text,
                     "playPrompt": [f"callflow:{AudioPrompts.REASON}"],
                     "goto": "TroubleLocation"
                 }
-            
-            # Trouble Location
-            elif "trouble location" in text:
+
+            elif "Trouble Location" in text:
                 node_config = {
                     "label": "TroubleLocation",
-                    "log": node.raw_text,
+                    "log": text,
                     "playPrompt": [f"callflow:{AudioPrompts.LOCATION}"],
+                    "goto": "CustomMessage"
+                }
+
+            elif "Custom Message" in text:
+                node_config = {
+                    "label": "CustomMessage",
+                    "log": text,
+                    "playPrompt": [f"callflow:{AudioPrompts.CALLOUT}"],
                     "goto": "AvailableForCallout"
                 }
-            
-            # Available For Callout
-            elif "available for callout" in text:
+
+            elif "Available For Callout" in text:
                 node_config = {
                     "label": "AvailableForCallout",
-                    "log": node.raw_text,
+                    "log": text,
                     "playPrompt": [f"callflow:{AudioPrompts.AVAILABLE}"],
                     "getDigits": {
                         "numDigits": 1,
                         "maxTries": 3,
                         "validChoices": "1|3|9",
-                        "errorPrompt": f"callflow:{AudioPrompts.INVALID}",
-                        "timeoutPrompt": f"callflow:{AudioPrompts.TIMEOUT}"
+                        "errorPrompt": f"callflow:{AudioPrompts.INVALID}"
                     },
                     "branch": {
                         "1": "AcceptedResponse",
@@ -218,88 +196,58 @@ class IVRTransformer:
                         "9": "QualifiedNo"
                     }
                 }
-            
-            # Accepted Response
-            elif "accepted response" in text:
+
+            elif "Accepted Response" in text:
                 node_config = {
                     "label": "AcceptedResponse",
-                    "log": node.raw_text,
+                    "log": text,
                     "playPrompt": [f"callflow:{AudioPrompts.ACCEPT}"],
                     "goto": "Goodbye"
                 }
-            
-            # Decline Response
-            elif "callout decline" in text:
+
+            elif "Callout Decline" in text:
                 node_config = {
                     "label": "CalloutDecline",
-                    "log": node.raw_text,
+                    "log": text,
                     "playPrompt": [f"callflow:{AudioPrompts.DECLINE}"],
                     "goto": "Goodbye"
                 }
-            
-            # Qualified No
-            elif "qualified no" in text:
+
+            elif "Qualified 'No'" in text or "Qualified No" in text:
                 node_config = {
                     "label": "QualifiedNo",
-                    "log": node.raw_text,
+                    "log": text,
                     "playPrompt": [f"callflow:{AudioPrompts.QUALIFIED}"],
                     "goto": "Goodbye"
                 }
-            
-            # Invalid Entry
-            elif "invalid" in text:
+
+            elif "Goodbye" in text:
                 node_config = {
-                    "label": "InvalidEntry",
-                    "log": node.raw_text,
-                    "playPrompt": [f"callflow:{AudioPrompts.INVALID}"],
-                    "goto": "Welcome"
-                }
-            
-            # Need More Time
-            elif "30-second message" in text:
-                node_config = {
-                    "label": "NeedMoreTime",
-                    "log": node.raw_text,
-                    "playPrompt": [f"callflow:{AudioPrompts.WAIT}"],
-                    "goto": "Welcome"
-                }
-            
-            # Not Home
-            elif "not home" in text:
-                node_config = {
-                    "label": "NotHome",
-                    "log": node.raw_text,
-                    "playPrompt": [f"callflow:{AudioPrompts.NOT_HOME}"],
-                    "goto": "Goodbye"
+                    "label": "Goodbye",
+                    "log": text,
+                    "playPrompt": [f"callflow:{AudioPrompts.GOODBYE}"],
+                    "goto": "Disconnect"
                 }
 
             if node_config:
-                logger.debug(f"Created config for {node_config['label']}")
+                logger.debug(f"Created config for node: {node_config['label']}")
             else:
-                logger.warning(f"No config created for text: {text}")
+                logger.warning(f"No matching configuration for text: {text}")
 
             return node_config
-            
+
         except Exception as e:
             logger.error(f"Error processing node: {str(e)}")
             return None
 
-    def _create_standard_handlers(self) -> List[Dict]:
-        """Create standard error and exit handlers"""
-        return [
-            {
-                "label": "Problems",
-                "log": "Error handler",
-                "playPrompt": [f"callflow:{AudioPrompts.ERROR}"],
-                "goto": "Goodbye"
-            },
-            {
-                "label": "Goodbye",
-                "log": "Call completion",
-                "playPrompt": [f"callflow:{AudioPrompts.GOODBYE}"],
-                "goto": "Disconnect"
-            }
-        ]
+    def _create_error_handler(self) -> Dict:
+        """Create standard error handler"""
+        return {
+            "label": "Problems",
+            "log": "Error handler",
+            "playPrompt": [f"callflow:{AudioPrompts.ERROR}"],
+            "goto": "Goodbye"
+        }
 
 def graph_to_ivr(graph: Dict) -> List[Dict[str, Any]]:
     """Convert Mermaid graph to IVR configuration with error handling"""
