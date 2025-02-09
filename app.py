@@ -26,6 +26,10 @@ st.set_page_config(
     layout="wide"
 )
 
+# Initialize session state
+if 'mermaid_code' not in st.session_state:
+    st.session_state.mermaid_code = None
+
 def save_temp_file(content: str, suffix: str = '.js') -> str:
     """Save content to a temporary file and return the path"""
     with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as f:
@@ -92,6 +96,7 @@ def main():
                         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
                             tmp_file.write(uploaded_file.getvalue())
                             mermaid_text = process_flow_diagram(tmp_file.name, openai_api_key)
+                            st.session_state.mermaid_code = mermaid_text  # Store in session state
                         
                         with col2:
                             st.subheader("Generated Diagram")
@@ -99,25 +104,7 @@ def main():
 
                         st.subheader("Generated Mermaid Code")
                         st.code(mermaid_text, language="mermaid")
-
-                        # Convert to IVR button
-                        if st.button("🔄 Convert to IVR"):
-                            with st.spinner("Converting to IVR..."):
-                                ivr_code = convert_mermaid_to_ivr(mermaid_text, openai_api_key)
-                                st.subheader("Generated IVR Code")
-                                st.code(ivr_code, language="javascript")
-                                
-                                # Download button
-                                tmp_file = save_temp_file(ivr_code)
-                                with open(tmp_file, 'rb') as f:
-                                    st.download_button(
-                                        label="⬇️ Download IVR Code",
-                                        data=f,
-                                        file_name="ivr_flow.js",
-                                        mime="text/plain"
-                                    )
-                                os.unlink(tmp_file)
-                                
+                        
                     except Exception as e:
                         st.error(f"Conversion Error: {str(e)}")
                         if show_debug:
@@ -130,43 +117,46 @@ def main():
         # Mermaid input
         mermaid_text = st.text_area(
             "Mermaid Diagram",
-            height=200
+            height=200,
+            value=st.session_state.mermaid_code if st.session_state.mermaid_code else ""
         )
+        st.session_state.mermaid_code = mermaid_text  # Store in session state
 
         if mermaid_text:
             # Preview
             st.subheader("Preview")
             st_mermaid.st_mermaid(mermaid_text, height=400)
 
-            # Convert to IVR button
-            if st.button("🔄 Convert to IVR"):
-                with st.spinner("Converting to IVR..."):
-                    try:
-                        if validate_syntax:
-                            error = validate_mermaid(mermaid_text)
-                            if error:
-                                st.error(error)
-                                return
+    # IVR Conversion (only show if we have Mermaid code)
+    if st.session_state.mermaid_code:
+        if st.button("🔄 Convert to IVR"):
+            with st.spinner("Converting to IVR..."):
+                try:
+                    if validate_syntax:
+                        error = validate_mermaid(st.session_state.mermaid_code)
+                        if error:
+                            st.error(error)
+                            return
 
-                        ivr_code = convert_mermaid_to_ivr(mermaid_text, openai_api_key)
-                        st.subheader("Generated IVR Code")
-                        st.code(ivr_code, language="javascript")
+                    ivr_code = convert_mermaid_to_ivr(st.session_state.mermaid_code, openai_api_key)
+                    st.subheader("Generated IVR Code")
+                    st.code(ivr_code, language="javascript")
 
-                        # Download button
-                        tmp_file = save_temp_file(ivr_code)
-                        with open(tmp_file, 'rb') as f:
-                            st.download_button(
-                                label="⬇️ Download IVR Code",
-                                data=f,
-                                file_name="ivr_flow.js",
-                                mime="text/plain"
-                            )
-                        os.unlink(tmp_file)
+                    # Download button
+                    tmp_file = save_temp_file(ivr_code)
+                    with open(tmp_file, 'rb') as f:
+                        st.download_button(
+                            label="⬇️ Download IVR Code",
+                            data=f,
+                            file_name="ivr_flow.js",
+                            mime="text/plain"
+                        )
+                    os.unlink(tmp_file)
 
-                    except Exception as e:
-                        st.error(f"Conversion Error: {str(e)}")
-                        if show_debug:
-                            st.exception(e)
+                except Exception as e:
+                    st.error(f"Conversion Error: {str(e)}")
+                    if show_debug:
+                        st.exception(e)
 
 if __name__ == "__main__":
     main()
