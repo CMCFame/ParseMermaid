@@ -6,7 +6,7 @@ import base64
 import io
 
 import streamlit as st
-import openai
+from openai import OpenAI
 from pdf2image import convert_from_path
 from PIL import Image
 
@@ -32,8 +32,7 @@ class FlowchartConverter:
                 "Please provide via argument, Streamlit secrets, or environment variable."
             )
         
-        openai.api_key = self.api_key
-
+        self.client = OpenAI(api_key=self.api_key)
         self.logger = logging.getLogger(__name__)
         logging.basicConfig(level=logging.INFO)
 
@@ -50,6 +49,7 @@ class FlowchartConverter:
         """Convert PDF's first page to base64 image"""
         try:
             images = convert_from_path(pdf_path, first_page=1, last_page=1)
+            
             if not images:
                 raise ValueError("No images extracted from PDF")
             
@@ -64,9 +64,9 @@ class FlowchartConverter:
 
     def convert_diagram(self, file_path: str) -> str:
         """
-        Convert flow diagram to Mermaid syntax.
-        Supports PDF and image files.
-        Uses model="gpt-4o" under openai==0.28.0
+        Convert flow diagram to Mermaid syntax
+        
+        Supports PDF and image files
         """
         # Validate file
         if not os.path.exists(file_path):
@@ -82,46 +82,75 @@ class FlowchartConverter:
             else self._encode_image(file_path)
         )
         
-        # System instructions for mermaid generation
-        system_instructions = """You are an expert Mermaid diagram generator. 
-1. Interpret the provided flowchart image (base64).
-2. Output a valid Mermaid flowchart with no syntax errors.
-3. Always enclose the code in triple backticks (```mermaid ... ```).
-4. Start with 'flowchart TD'.
-5. Use unique node IDs (A1, B1, C1, etc.).
-6. Retain original text from the flowchart as best you can without paraphrasing.
-7. Label edges exactly as in the diagram, e.g. -->|"1 - Yes"| or --> for unlabeled edges.
-"""
-
-        messages = [
-            {"role": "system", "content": system_instructions},
-            {
-                "role": "user",
-                "content": f"Convert this flowchart image (base64) to Mermaid:\n\ndata:image/png;base64,{base64_image}"
-            }
-        ]
-
+        # OpenAI API call
         try:
-            # Using pinned openai==0.28.0 => ChatCompletion.create is still valid
-            response = openai.ChatCompletion.create(
-                model="gpt-4o",  # Your custom GPT-4-like model name
-                messages=messages,
-                max_tokens=2048,
-                temperature=0.0
+            response = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """You are an expert Mermaid diagram generator specializing in complex flowchart conversions. 
+
+MERMAID SYNTAX STRICT REQUIREMENTS:
+1. Always start with 'flowchart TD'
+2. Node Formatting:
+   - Use unique node IDs (A1, B1, C1)
+   - Enclose node text in square brackets with quotes
+   - Use <br> for line breaks
+3. Node Connections:
+   - Standard connection: -->
+   - Labeled connection: -->|"label"|
+4. Decision Nodes:
+   - Use {} for diamond/decision nodes
+5. Capture Complete Flow:
+   - Include all paths
+   - Show retry and error handling
+   - Maintain original diagram's logic
+6. Syntax Precision:
+   - No syntax errors
+   - Clear, logical flow
+   - Readable node labels
+
+OUTPUT EXAMPLE:
+
+mermaid
+flowchart TD
+    A1["Start Node"] -->|"Label"| B1{"Decision Node"}
+    B1 -->|"Yes"| C1["Success Node"]
+    B1 -->|"No"| D1["Error Node"]
+
+"""
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Convert this complex call flow diagram to precise Mermaid syntax. Ensure 100% accuracy and readability."},
+                            {
+                                "type": "image_url", 
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_image}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=4096,
+                temperature=0.1  # Highly deterministic
             )
             
-            raw_response = response.choices[0].message.content.strip()
-            self.logger.info(f"Raw GPT Response: {raw_response}")
+            # Extract Mermaid code
+            mermaid_text = response.choices[0].message.content.strip()
+            
+            # Clean up code block markers and extract Mermaid content
+            mermaid_match = re.search(r'
 
-            # Extract the code between ```mermaid ... ```
-            mermaid_match = re.search(r'```mermaid\s+(.*?)```', raw_response, re.DOTALL | re.IGNORECASE)
+mermaid\n(.*?)
+
+', mermaid_text, re.DOTALL)
             if mermaid_match:
                 mermaid_text = mermaid_match.group(1).strip()
-            else:
-                # If GPT didn't wrap in code fences, fallback to entire text
-                mermaid_text = raw_response
-
-            # Ensure it starts with flowchart TD
+            
+            # Ensure starts with flowchart definition
             if not mermaid_text.startswith('flowchart TD'):
                 mermaid_text = f'flowchart TD\n{mermaid_text}'
             
@@ -133,8 +162,7 @@ class FlowchartConverter:
 
 def process_flow_diagram(file_path: str, api_key: Optional[str] = None) -> str:
     """
-    Wrapper function for file diagram conversion.
-    Pins openai==0.28.0 and uses "gpt-4o".
+    Wrapper function for file diagram conversion
     
     Args:
         file_path: Path to diagram file (PDF or image)

@@ -29,6 +29,7 @@ class Edge:
 
 class MermaidParser:
     def __init__(self):
+        # Comprehensive node type detection patterns
         self.node_patterns = {
             NodeType.START: [
                 r'\bstart\b', r'\bbegin\b', r'\bentry\b', 
@@ -44,18 +45,19 @@ class MermaidParser:
             ],
             NodeType.INPUT: [
                 r'\binput\b', r'\benter\b', r'\bprompt\b', 
-                r'\bget\b', r'\bdigits\b', r'\bpin\b'
+                r'\bget\b', r'\bdigits\b'
             ],
             NodeType.TRANSFER: [
                 r'\btransfer\b', r'\bcall\b', r'\broute\b', 
-                r'\bdispatch\b', r'\bdispatcher\b'
+                r'\bdispatch\b'
             ],
             NodeType.SUBPROCESS: [
-                r'\bsubprocess\b', r'\bsub\b', r'\bmodule\b'
+                r'\bsubprocess\b', r'\bsub\b', r'\bcall\b', 
+                r'\bmodule\b'
             ]
         }
 
-        # Basic detection patterns
+        # Comprehensive regex patterns for node parsing
         self.node_type_patterns = {
             r'\["([^"]+)"\]': NodeType.ACTION,
             r'\(([^)]+)\)': NodeType.ACTION,
@@ -65,16 +67,21 @@ class MermaidParser:
         }
 
     def categorize_node(self, text: str) -> NodeType:
+        """Intelligently categorize node type based on text content and patterns"""
         text_lower = text.lower()
+        
+        # Check specific keyword patterns first
         for node_type, patterns in self.node_patterns.items():
-            for pattern in patterns:
-                if re.search(pattern, text_lower):
-                    return node_type
+            if any(re.search(pattern, text_lower) for pattern in patterns):
+                return node_type
+        
+        # Default to ACTION if no specific type detected
         return NodeType.ACTION
 
     def parse(self, mermaid_text: str) -> Dict:
+        """Advanced parsing with flexible node and edge detection"""
         lines = [line.strip() for line in mermaid_text.split('\n') if line.strip()]
-
+        
         nodes = {}
         edges = []
         subgraphs = {}
@@ -82,9 +89,11 @@ class MermaidParser:
         current_subgraph = None
 
         for line in lines:
+            # Skip non-meaningful lines
             if not line or line.startswith('%%') or line.startswith('flowchart'):
                 continue
 
+            # Subgraph handling
             if line.startswith('subgraph'):
                 subgraph_match = re.match(r'subgraph\s+(\w+)\s*(\[.*\])?', line)
                 if subgraph_match:
@@ -95,11 +104,12 @@ class MermaidParser:
                     }
                 continue
 
+            # End of subgraph
             if line == 'end':
                 current_subgraph = None
                 continue
 
-            # Node parsing
+            # Node parsing (more robust)
             node_match = None
             for pattern, node_type in self.node_type_patterns.items():
                 match = re.match(r'^(\w+)' + pattern, line)
@@ -110,20 +120,22 @@ class MermaidParser:
             if node_match:
                 node_id = node_match.group(1)
                 text = node_match.group(2)
+                
                 nodes[node_id] = Node(
                     id=node_id,
                     raw_text=text,
                     node_type=self.categorize_node(text),
                     subgraph=current_subgraph
                 )
-
-            # Edge parsing
+            
+            # Edge parsing (more comprehensive)
             edge_patterns = [
-                r'^(\w+)\s*-->\s*(\w+)$',
-                r'^(\w+)\s*--\|"?([^"]+)"?\|\s*(\w+)',
-                r'^(\w+)\s*\.\.\.\s*(\w+)',
-                r'^(\w+)\s*=+>\s*(\w+)'
+                r'^(\w+)\s*-->\s*(\w+)',  # Simple edge
+                r'^(\w+)\s*--\|([^|]+)\|>\s*(\w+)',  # Edge with label
+                r'^(\w+)\s*\.\.\.\s*(\w+)',  # Dotted edge
+                r'^(\w+)\s*=+>\s*(\w+)'  # Thick edge
             ]
+
             for pattern in edge_patterns:
                 edge_match = re.match(pattern, line)
                 if edge_match:
@@ -133,7 +145,12 @@ class MermaidParser:
                         label = None
                     else:
                         from_node, label, to_node = groups
-                    edges.append(Edge(from_id=from_node, to_id=to_node, label=label))
+                    
+                    edges.append(Edge(
+                        from_id=from_node,
+                        to_id=to_node,
+                        label=label
+                    ))
                     break
 
         return {
@@ -144,5 +161,6 @@ class MermaidParser:
         }
 
 def parse_mermaid(mermaid_text: str) -> Dict:
+    """Wrapper function for easy access"""
     parser = MermaidParser()
     return parser.parse(mermaid_text)
