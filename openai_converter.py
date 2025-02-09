@@ -6,7 +6,7 @@ import base64
 import io
 
 import streamlit as st
-from openai import OpenAI
+import openai  # Make sure you have openai installed
 from pdf2image import convert_from_path
 from PIL import Image
 
@@ -32,7 +32,8 @@ class FlowchartConverter:
                 "Please provide via argument, Streamlit secrets, or environment variable."
             )
         
-        self.client = OpenAI(api_key=self.api_key)
+        openai.api_key = self.api_key
+
         self.logger = logging.getLogger(__name__)
         logging.basicConfig(level=logging.INFO)
 
@@ -82,69 +83,51 @@ class FlowchartConverter:
             else self._encode_image(file_path)
         )
         
-        # OpenAI API call
+        # ### CHANGE: Revised system prompt for stricter rules
+        system_instructions = """You are an expert Mermaid diagram generator. 
+        Your task: 
+        1. Perform OCR or otherwise interpret the provided image of a flowchart. 
+        2. Output a strictly valid Mermaid flowchart with no syntax errors. 
+        3. Always enclose the result in triple backticks ```mermaid ... ``` and begin with `flowchart TD`.
+        4. For each node:
+           - Use unique IDs (A1, B1, C1, etc.). 
+           - Enclose node text in square brackets "[ ... ]" or curly braces "{ ... }" if it's a decision. 
+           - Retain original text as much as possible without paraphrasing. 
+        5. For edges:
+           - Keep label text EXACTLY as in the diagram (like "1 - Yes", "2 - No", etc.). 
+           - Use the syntax -->|"label"| for labeled edges, and --> for unlabeled edges. 
+        6. Ensure it starts with: flowchart TD
+        7. Provide no additional commentary outside the mermaid code block.
+        """
+
+        messages = [
+            {"role": "system", "content": system_instructions},
+            {
+                "role": "user",
+                "content": f"Please convert this flowchart image into Mermaid code. The image is base64-encoded:\n\ndata:image/png;base64,{base64_image}"
+            }
+        ]
+
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": """You are an expert Mermaid diagram generator specializing in complex flowchart conversions. 
-
-MERMAID SYNTAX STRICT REQUIREMENTS:
-1. Always start with 'flowchart TD'
-2. Node Formatting:
-   - Use unique node IDs (A1, B1, C1)
-   - Enclose node text in square brackets with quotes
-   - Use <br> for line breaks
-3. Node Connections:
-   - Standard connection: -->
-   - Labeled connection: -->|"label"|
-4. Decision Nodes:
-   - Use {} for diamond/decision nodes
-5. Capture Complete Flow:
-   - Include all paths
-   - Show retry and error handling
-   - Maintain original diagram's logic
-6. Syntax Precision:
-   - No syntax errors
-   - Clear, logical flow
-   - Readable node labels
-
-OUTPUT EXAMPLE:
-```mermaid
-flowchart TD
-    A1["Start Node"] -->|"Label"| B1{"Decision Node"}
-    B1 -->|"Yes"| C1["Success Node"]
-    B1 -->|"No"| D1["Error Node"]
-```"""
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "Convert this complex call flow diagram to precise Mermaid syntax. Ensure 100% accuracy and readability."},
-                            {
-                                "type": "image_url", 
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{base64_image}"
-                                }
-                            }
-                        ]
-                    }
-                ],
-                max_tokens=4096,
-                temperature=0.1  # Highly deterministic
+            response = openai.ChatCompletion.create(
+                model="gpt-4",  # or "gpt-3.5-turbo" if GPT-4 is unavailable
+                messages=messages,
+                max_tokens=2048,
+                temperature=0.0
             )
             
-            # Extract Mermaid code
-            mermaid_text = response.choices[0].message.content.strip()
-            
-            # Clean up code block markers and extract Mermaid content
-            mermaid_match = re.search(r'```mermaid\n(.*?)```', mermaid_text, re.DOTALL)
+            raw_response = response.choices[0].message.content.strip()
+            self.logger.info(f"Raw GPT Response: {raw_response}")
+
+            # Extract the code between ```mermaid ... ```
+            mermaid_match = re.search(r'```mermaid\s+(.*?)```', raw_response, re.DOTALL | re.IGNORECASE)
             if mermaid_match:
                 mermaid_text = mermaid_match.group(1).strip()
-            
-            # Ensure starts with flowchart definition
+            else:
+                # If GPT didn't wrap in code fences, fallback
+                mermaid_text = raw_response
+
+            # Ensure it starts with flowchart TD
             if not mermaid_text.startswith('flowchart TD'):
                 mermaid_text = f'flowchart TD\n{mermaid_text}'
             

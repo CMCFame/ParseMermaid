@@ -45,19 +45,17 @@ class MermaidParser:
             ],
             NodeType.INPUT: [
                 r'\binput\b', r'\benter\b', r'\bprompt\b', 
-                r'\bget\b', r'\bdigits\b'
+                r'\bget\b', r'\bdigits\b', r'\bpin\b'
             ],
             NodeType.TRANSFER: [
                 r'\btransfer\b', r'\bcall\b', r'\broute\b', 
-                r'\bdispatch\b'
+                r'\bdispatch\b', r'\bdispatcher\b'
             ],
             NodeType.SUBPROCESS: [
-                r'\bsubprocess\b', r'\bsub\b', r'\bcall\b', 
-                r'\bmodule\b'
+                r'\bsubprocess\b', r'\bsub\b', r'\bmodule\b'
             ]
         }
 
-        # Comprehensive regex patterns for node parsing
         self.node_type_patterns = {
             r'\["([^"]+)"\]': NodeType.ACTION,
             r'\(([^)]+)\)': NodeType.ACTION,
@@ -72,16 +70,17 @@ class MermaidParser:
         
         # Check specific keyword patterns first
         for node_type, patterns in self.node_patterns.items():
-            if any(re.search(pattern, text_lower) for pattern in patterns):
-                return node_type
+            for pattern in patterns:
+                if re.search(pattern, text_lower):
+                    return node_type
         
-        # Default to ACTION if no specific type detected
+        # If none matched, assume ACTION
         return NodeType.ACTION
 
     def parse(self, mermaid_text: str) -> Dict:
         """Advanced parsing with flexible node and edge detection"""
         lines = [line.strip() for line in mermaid_text.split('\n') if line.strip()]
-        
+
         nodes = {}
         edges = []
         subgraphs = {}
@@ -104,12 +103,11 @@ class MermaidParser:
                     }
                 continue
 
-            # End of subgraph
             if line == 'end':
                 current_subgraph = None
                 continue
 
-            # Node parsing (more robust)
+            # Node parsing
             node_match = None
             for pattern, node_type in self.node_type_patterns.items():
                 match = re.match(r'^(\w+)' + pattern, line)
@@ -127,13 +125,18 @@ class MermaidParser:
                     node_type=self.categorize_node(text),
                     subgraph=current_subgraph
                 )
-            
-            # Edge parsing (more comprehensive)
+
+            # Edge parsing
+            # ### CHANGE: More robust edge label detection
+            # We'll try multiple patterns (with labels, without, dotted, etc.)
             edge_patterns = [
-                r'^(\w+)\s*-->\s*(\w+)',  # Simple edge
-                r'^(\w+)\s*--\|([^|]+)\|>\s*(\w+)',  # Edge with label
-                r'^(\w+)\s*\.\.\.\s*(\w+)',  # Dotted edge
-                r'^(\w+)\s*=+>\s*(\w+)'  # Thick edge
+                # 1) from --> to
+                r'^(\w+)\s*-->\s*(\w+)$',
+                # 2) from -->|"label"| to
+                r'^(\w+)\s*--\|"?([^"]+)"?\|\s*(\w+)',
+                # 3) dotted edge or thick edges
+                r'^(\w+)\s*\.\.\.\s*(\w+)',
+                r'^(\w+)\s*=+>\s*(\w+)'
             ]
 
             for pattern in edge_patterns:
@@ -145,12 +148,7 @@ class MermaidParser:
                         label = None
                     else:
                         from_node, label, to_node = groups
-                    
-                    edges.append(Edge(
-                        from_id=from_node,
-                        to_id=to_node,
-                        label=label
-                    ))
+                    edges.append(Edge(from_id=from_node, to_id=to_node, label=label))
                     break
 
         return {

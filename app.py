@@ -134,6 +134,8 @@ def main():
         show_debug_info = st.checkbox("Show Detailed Conversion Info", value=False)
 
     # Main content area
+    mermaid_text = ""
+
     if conversion_method == "Mermaid Editor":
         # Example flow selection for Mermaid Editor
         selected_example = st.selectbox(
@@ -143,7 +145,7 @@ def main():
         
         # Mermaid diagram input
         mermaid_text = st.text_area(
-            "Enter Mermaid Flowchart", 
+            "Enter or Edit Mermaid Flowchart", 
             value=DEFAULT_FLOWS[selected_example] if selected_example != "Custom" else "",
             height=400
         )
@@ -169,17 +171,13 @@ def main():
             # Image preview
             if uploaded_file:
                 try:
-                    # Open the image
                     image = Image.open(uploaded_file)
                     st.image(image, caption="Uploaded Flowchart", use_column_width=True)
                 except Exception as e:
                     st.error(f"Error previewing image: {e}")
-        
-        # Mermaid conversion section
-        mermaid_text = ""
+
         if uploaded_file and openai_api_key:
-            # Conversion button
-            if st.button("🔄 Convert Image to Mermaid"):
+            if st.button("🔄 Convert Image/PDF to Mermaid"):
                 with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
                     tmp_file.write(uploaded_file.getvalue())
                     tmp_file_path = tmp_file.name
@@ -188,8 +186,7 @@ def main():
                     # Convert image to Mermaid
                     mermaid_text = process_flow_diagram(tmp_file_path, openai_api_key)
                     
-                    # Display converted Mermaid code
-                    st.subheader("Converted Mermaid Diagram")
+                    st.subheader("AI-Generated Mermaid Diagram")
                     st.code(mermaid_text, language="mermaid")
                     
                     st.success("Image successfully converted to Mermaid diagram!")
@@ -197,15 +194,19 @@ def main():
                     st.error(f"Conversion Error: {e}")
                     mermaid_text = ""
                 finally:
-                    # Clean up temporary file
                     os.unlink(tmp_file_path)
+
+    # ### CHANGE: Added a second text area to let the user override/fix Mermaid if needed
+    if mermaid_text:
+        st.subheader("Edit Mermaid Code Before Parsing")
+        mermaid_text = st.text_area("Override / Fine-tune the Mermaid code", mermaid_text, height=300)
 
     # Diagram preview column
     col1, col2 = st.columns([2, 1])
     
     with col1:
         # Conversion button
-        if st.button("🔄 Convert to IVR Code"):
+        if st.button("➡ Convert to IVR Code"):
             try:
                 # Optional syntax validation
                 if validate_syntax and mermaid_text:
@@ -226,12 +227,16 @@ def main():
 
                 # Display results
                 st.subheader("📤 Generated IVR Configuration")
-                st.code(output, language="javascript")
+                # Show JavaScript as default for code block syntax highlighting
+                syntax_lang = "javascript" if export_format.lower() == "javascript" else export_format.lower()
+                st.code(output, language=syntax_lang)
 
                 # Debug information
                 if show_debug_info:
                     with st.expander("Conversion Details"):
+                        st.write("**Parsed Graph**")
                         st.json(parsed_graph)
+                        st.write("**IVR Nodes**")
                         st.json(ivr_nodes)
 
                 # Temporary file and download
