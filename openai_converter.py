@@ -6,89 +6,73 @@ import re
 import logging
 import base64
 import io
-from typing import Optional, List, Dict
-from dataclasses import dataclass
+from typing import Optional
 from PIL import Image
 from pdf2image import convert_from_path
 import streamlit as st
 from openai import OpenAI
 
-@dataclass
-class ConversionConfig:
-    """Configuration for conversion process"""
-    temperature: float = 0.1
-    max_tokens: int = 4096
-    supported_formats: set = None
-    
-    def __post_init__(self):
-        if self.supported_formats is None:
-            self.supported_formats = {'.pdf', '.png', '.jpg', '.jpeg'}
-
 class IVRPromptLibrary:
-    """IVR-specific prompting templates"""
+    """Enhanced prompting for exact IVR diagram reproduction"""
     
-    SYSTEM_PROMPT = """You are an expert in converting IVR (Interactive Voice Response) flow diagrams to Mermaid syntax. Focus on precise call flow logic and IVR-specific elements.
+    SYSTEM_PROMPT = """You are a specialized converter focused on creating EXACT, VERBATIM Mermaid.js flowchart representations of IVR call flow diagrams. Your task is to reproduce the input diagram with 100% accuracy, maintaining all text, connections, and flow logic exactly as shown.
 
-Required Elements to Identify and Convert:
-1. Entry Points:
-   - Call start nodes
-   - Initial greetings
-   - System initialization
+CRITICAL REQUIREMENTS:
+1. Text Content:
+   - Copy ALL text exactly as written, including punctuation and capitalization
+   - Use <br/> for line breaks within nodes
+   - Preserve parentheses, special characters, and spacing
+   - Include all numbers and reference texts (e.g., "page 25", "Level 2")
 
-2. User Interaction Points:
-   - DTMF input collection
-   - Menu option selections
-   - PIN/code entry
-   - Confirmation prompts
+2. Node Types:
+   - Decision diamonds: Use {"text"} for any decision/question nodes
+   - Process rectangles: Use ["text"] for standard process nodes
+   - Maintain exact node shapes as shown in the original
 
-3. Decision Logic:
-   - Yes/No branches
-   - Multi-choice menus
-   - Conditional routing
-   - Input validation
+3. Connections:
+   - Preserve ALL connection labels exactly as written
+   - Include retry loops and self-references
+   - Maintain connection directions
+   - Copy specific button press labels (e.g., "Press 1", "7 - not home")
 
-4. Error Handling:
-   - Invalid input recovery
-   - Timeout handling
-   - Retry loops
-   - Maximum attempt limits
+4. Document Elements:
+   - Include headers, titles, and subtitles
+   - Preserve footer text and company information
+   - Include all notes and references
+   - Maintain page numbers and section references
 
-5. Call Flow Control:
-   - Transfers
-   - Call termination
-   - System messages
-   - Hold/wait states
+5. Special Elements:
+   - Include conditional logic text exactly as shown
+   - Preserve system messages and prompts
+   - Maintain error handling paths
+   - Keep timeout and retry logic
 
-Mermaid Syntax Requirements:
-1. Start with: flowchart TD
-2. Node Format:
-   - Entry: A["Start Call"]
-   - Menu: B{"Enter Selection"}
-   - Action: C["Play Message"]
-   - Input: D["Get DTMF"]
-   - Exit: E["End Call"]
-
-3. Connection Format:
-   - Basic: -->
-   - With DTMF: -->|"Press 1"|
-   - Error: -->|"Invalid"|
-   - Timeout: -.->
-
-Example IVR Flow:
+EXAMPLE FORMAT:
 flowchart TD
-    A["Start Call"] --> B{"Main Menu"}
-    B -->|"Press 1"| C["Check Balance"]
-    B -->|"Press 2"| D["Transfer to Agent"]
-    B -->|"Invalid"| E["Retry Message"]
-    E --> B
-    C --> F["End Call"]
-    D --> F"""
+    A["Exact Node Text<br/>With line breaks<br/>And formatting"] -->|"Exact Label Text"| B{"Decision Text<br/>With Options"}
+    B -->|"1 - exact option"| C["Next Step"]
+    B -->|"retry"| A
 
-    ERROR_RECOVERY = """If the diagram is unclear or complex:
-1. Focus on core call flow first
-2. Add error handling paths
-3. Include retry loops for invalid inputs
-4. Ensure all paths lead to resolution"""
+ERROR PREVENTION:
+- Do not summarize or simplify text
+- Do not modify connection logic
+- Do not omit any elements
+- Do not change terminology
+- Do not rearrange the flow
+
+OUTPUT REQUIREMENTS:
+- Must start with: flowchart TD
+- Use correct Mermaid.js syntax
+- Preserve exact diagram structure
+- Include all original elements
+- Maintain visual hierarchy"""
+
+    ERROR_RECOVERY = """If conversion is unclear:
+1. Focus on exact text reproduction first
+2. Maintain all connection paths exactly
+3. Preserve decision logic precisely
+4. Keep all labeling and numbering
+5. Include every element shown"""
 
 class ImageProcessor:
     """Enhanced image processing capabilities"""
@@ -124,7 +108,7 @@ class FlowchartConverter:
     """Enhanced OpenAI-powered flowchart converter"""
     
     def __init__(self, api_key: Optional[str] = None):
-        """Initialize converter with configuration"""
+        """Initialize converter with API key"""
         self.api_key = (
             api_key or 
             st.secrets.get("OPENAI_API_KEY") or 
@@ -135,7 +119,6 @@ class FlowchartConverter:
             raise ValueError("OpenAI API key not found")
         
         self.client = OpenAI(api_key=self.api_key)
-        self.config = ConversionConfig()
         self.logger = logging.getLogger(__name__)
         self.image_processor = ImageProcessor()
 
@@ -155,8 +138,10 @@ class FlowchartConverter:
                 raise FileNotFoundError(f"File not found: {file_path}")
             
             file_ext = os.path.splitext(file_path)[1].lower()
-            if file_ext not in self.config.supported_formats:
-                raise ValueError(f"Unsupported format. Supported: {self.config.supported_formats}")
+            supported_formats = {'.pdf', '.png', '.jpg', '.jpeg'}
+            
+            if file_ext not in supported_formats:
+                raise ValueError(f"Unsupported format. Supported: {supported_formats}")
             
             # Process image
             if file_ext == '.pdf':
@@ -182,9 +167,7 @@ class FlowchartConverter:
                         "content": [
                             {
                                 "type": "text",
-                                "text": "Convert this IVR flow diagram to Mermaid syntax. "
-                                       "Ensure accurate capture of call flow logic, menu options, "
-                                       "and error handling paths."
+                                "text": "Convert this IVR flow diagram to Mermaid syntax EXACTLY as shown. Maintain all text, connections, and formatting precisely."
                             },
                             {
                                 "type": "image_url",
@@ -195,8 +178,8 @@ class FlowchartConverter:
                         ]
                     }
                 ],
-                max_tokens=self.config.max_tokens,
-                temperature=self.config.temperature
+                max_tokens=4096,
+                temperature=0.1  # Low temperature for more precise output
             )
             
             # Extract and clean Mermaid code
@@ -234,12 +217,9 @@ class FlowchartConverter:
     def _validate_mermaid_syntax(self, mermaid_text: str) -> bool:
         """Validate basic Mermaid syntax"""
         required_elements = [
-            # Must have flowchart definition
-            r'flowchart\s+TD',
-            # Must have at least one node
-            r'\w+\s*[\["{\(]',
-            # Must have at least one connection
-            r'-->'
+            r'flowchart\s+TD',    # Must have flowchart definition
+            r'\w+\s*[\["{\(]',    # Must have at least one node
+            r'-->'                # Must have at least one connection
         ]
         
         return all(re.search(pattern, mermaid_text) for pattern in required_elements)
@@ -259,8 +239,7 @@ class FlowchartConverter:
                         "content": [
                             {
                                 "type": "text",
-                                "text": "Convert this diagram, focusing on core call flow "
-                                       "and essential error handling only."
+                                "text": "Convert this diagram with exact text reproduction and maintain all connections precisely."
                             },
                             {
                                 "type": "image_url",
@@ -271,8 +250,8 @@ class FlowchartConverter:
                         ]
                     }
                 ],
-                max_tokens=self.config.max_tokens,
-                temperature=0.3  # More conservative for recovery
+                max_tokens=4096,
+                temperature=0.3  # Slightly higher temperature for recovery
             )
             
             return self._clean_mermaid_code(
