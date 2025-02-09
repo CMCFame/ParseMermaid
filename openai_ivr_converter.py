@@ -17,98 +17,87 @@ class OpenAIIVRConverter:
     def convert_to_ivr(self, mermaid_code: str) -> str:
         """Convert Mermaid diagram to IVR configuration using GPT-4"""
         
-        prompt = f"""You are an expert IVR system developer. Create an exact 1:1 conversion of this IVR flow diagram into JavaScript code. Each node and path in the Mermaid diagram must have a corresponding IVR configuration.
+        prompt = f"""You are an expert IVR system developer. Convert this Mermaid flowchart into a complete IVR JavaScript configuration following these exact requirements:
 
-        Rules for conversion:
-        1. Initial Welcome Node ("This is an electric callout..."):
+        The IVR system requires specific configuration format:
+
+        1. Node Structure:
+           - Each node must have a unique "label" (node identifier)
+           - "log" property for documentation/logging
+           - "playPrompt" array with callflow IDs
+           - Optional properties based on node type:
+             * getDigits: For input collection
+             * branch: For conditional navigation
+             * goto: For direct transitions
+             * maxLoop: For retry limits
+             * gosub: For subroutine calls
+             * nobarge: For non-interruptible messages
+
+        2. Audio Prompts:
+           Use exact callflow IDs:
+           - 1001: Welcome/initial message
+           - 1008: PIN entry request
+           - 1009: Invalid input/retry
+           - 1010: Timeout message
+           - 1167: Accept response
+           - 1021: Decline response
+           - 1266: Qualified no response
+           - 1274: Electric callout info
+           - 1019: Callout reason
+           - 1232: Location information
+           - 1265: Wait message
+           - 1017: Not home message
+           - 1316: Availability check
+           - 1029: Goodbye message
+           - 1351: Error message
+
+        3. Input Handling:
+           For getDigits nodes:
            {{
-             "label": "Welcome",
-             "log": "Initial welcome and menu options",
-             "playPrompt": ["callflow:1001"],
-             "getDigits": {{
-               "numDigits": 1,
-               "maxTries": 3,
-               "validChoices": "1|3|7|9",
-               "errorPrompt": "callflow:1009",
-               "timeoutPrompt": "callflow:1010"
-             }},
-             "branch": {{
-               "1": "EnterPin",
-               "3": "NeedMoreTime",
-               "7": "NotHome",
-               "9": "Welcome"
-             }}
+             "numDigits": <number>,
+             "maxTries": <number>,
+             "validChoices": "1|2|3",
+             "errorPrompt": "callflow:1009",
+             "timeoutPrompt": "callflow:1010"
            }}
 
-        2. PIN Entry and Validation:
-           - First check for entered digits
-           - Then validate PIN
-           - Include retry paths
-           - Use callflow:1008 for PIN prompt
+        4. Call Flow Control:
+           - Use "branch" for conditional paths
+           - Use "goto" for direct transitions
+           - Use "gosub" for subroutines like SaveCallResult
+           - Include retry logic with maxLoop
+           - Handle timeouts and errors
 
-        3. Response Nodes:
-           Accepted Response:
-           {{
-             "label": "AcceptedResponse",
-             "log": "Response accepted",
-             "playPrompt": ["callflow:1167"],
-             "gosub": ["SaveCallResult", 1001, "Accept"],
-             "goto": "Goodbye"
-           }}
-
-        4. Audio Prompt Mapping:
-           - Welcome/Menu: callflow:1001
-           - PIN Entry: callflow:1008
-           - Invalid Input: callflow:1009
-           - Electric Callout: callflow:1274
-           - Callout Reason: callflow:1019
-           - Location Info: callflow:1232
-           - Wait Message: callflow:1265
-           - Not Home: callflow:1017
-           - Available Check: callflow:1316
-           - Accept: callflow:1167
-           - Decline: callflow:1021
-           - Qualified No: callflow:1266
-           - Goodbye: callflow:1029
-
-        5. SaveCallResult Codes:
+        5. Standard Response Codes:
+           SaveCallResult parameters:
            - Accept: [1001, "Accept"]
            - Decline: [1002, "Decline"]
            - Not Home: [1006, "NotHome"]
            - Qualified No: [1145, "QualNo"]
            - Error: [1198, "Error Out"]
 
-        Critical Requirements:
-        1. Every node in the Mermaid diagram must have a corresponding IVR node
-        2. Every connection and condition must be preserved
-        3. Retry logic must match the diagram exactly
-        4. Error handling paths must be maintained
-        5. All menu options and input handling must match
-        6. PIN verification flow must include both checks shown in diagram
-        7. Available for Callout must include all options (1,3,9)
-        8. Preserve the exact flow sequence
-
-        Here's the Mermaid diagram:
+        Here's the Mermaid diagram to convert:
 
         {mermaid_code}
 
-        Convert this diagram into a complete IVR configuration, ensuring every node and path is preserved exactly.
-        Return only the JavaScript code in module.exports format."""
+        Generate a complete IVR configuration that exactly matches this flow pattern.
+        Return only the JavaScript code in the format:
+        module.exports = [ ... ];"""
 
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4",  # Note: Changed from gpt-4o to gpt-4
+                model="gpt-4o",
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an expert IVR system developer. Your task is to create exact 1:1 conversions from flowcharts to IVR code, preserving every node, path, and condition precisely."
+                        "content": "You are an expert IVR system developer specialized in creating precise IVR configurations with specific callflow IDs and control structures."
                     },
                     {
                         "role": "user",
                         "content": prompt
                     }
                 ],
-                temperature=0.1,
+                temperature=0.1,  # Low temperature for consistent output
                 max_tokens=4000
             )
 
@@ -121,27 +110,18 @@ class OpenAIIVRConverter:
                 end_idx = ivr_code.rfind("];") + 2
                 ivr_code = ivr_code[start_idx:end_idx]
 
-            # Validate code
-            try:
-                # Remove module.exports wrapper for validation
-                json_str = ivr_code[16:-1]  # Remove "module.exports = " and ";"
-                nodes = json.loads(json_str)
-                
-                # Validate node structure
-                required_nodes = [
-                    "Welcome", "EnterPin", "ElectricCallout", 
-                    "CalloutReason", "TroubleLocation", "CustomMessage",
-                    "AvailableForCallout", "AcceptedResponse", "CalloutDecline",
-                    "QualifiedNo", "Goodbye"
-                ]
-                
-                found_nodes = set(node['label'] for node in nodes if isinstance(node, dict) and 'label' in node)
-                missing_nodes = set(required_nodes) - found_nodes
-                
-                if missing_nodes:
-                    logger.warning(f"Missing nodes: {missing_nodes}")
-                    raise ValueError("Generated code missing required nodes")
+            # Validate basic structure
+            if not (ivr_code.startswith("module.exports = [") and ivr_code.endswith("];")):
+                raise ValueError("Invalid IVR code format generated")
 
+            # Basic validation of node structure
+            try:
+                nodes = json.loads(ivr_code[16:-1])  # Remove module.exports = and ;
+                if not isinstance(nodes, list):
+                    raise ValueError("Generated code is not a valid node array")
+                for node in nodes:
+                    if not isinstance(node, dict) or 'label' not in node:
+                        raise ValueError("Invalid node structure")
             except json.JSONDecodeError:
                 raise ValueError("Generated code is not valid JSON")
 
@@ -149,6 +129,7 @@ class OpenAIIVRConverter:
 
         except Exception as e:
             logger.error(f"IVR conversion failed: {str(e)}")
+            # Return a basic error handler node
             return '''module.exports = [
   {
     "label": "Problems",
