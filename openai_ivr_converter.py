@@ -1,5 +1,5 @@
 """
-Direct IVR conversion using OpenAI with specific IVR format handling
+Enhanced OpenAI-based IVR conversion with exact flow matching
 """
 from typing import Dict, List, Any
 from openai import OpenAI
@@ -17,72 +17,74 @@ class OpenAIIVRConverter:
     def convert_to_ivr(self, mermaid_code: str) -> str:
         """Convert Mermaid diagram to IVR configuration using GPT-4"""
         
-        prompt = f"""You are an expert IVR system developer. Convert this Mermaid flowchart into a complete IVR JavaScript configuration following these exact requirements:
+        prompt = f"""You are an expert IVR system developer. Create a precise, 1:1 IVR configuration from this Mermaid flowchart following these exact requirements:
 
-        The IVR system requires specific configuration format:
+        1. Node Structure Requirements:
+           - Each node needs exact properties depending on its type:
+             * Welcome/Menu nodes need getDigits with specific options
+             * Decision nodes need branch logic with all paths
+             * Response nodes need appropriate callflow IDs
+             * All nodes need proper goto or branch properties
 
-        1. Node Structure:
-           - Each node must have a unique "label" (node identifier)
-           - "log" property for documentation/logging
-           - "playPrompt" array with callflow IDs
-           - Optional properties based on node type:
-             * getDigits: For input collection
-             * branch: For conditional navigation
-             * goto: For direct transitions
-             * maxLoop: For retry limits
-             * gosub: For subroutine calls
-             * nobarge: For non-interruptible messages
+        2. Exact Audio Prompts to Use:
+           Welcome/Initial: callflow:1001
+           PIN Entry: callflow:1008
+           Invalid Input: callflow:1009
+           Timeout: callflow:1010
+           Electric Callout: callflow:1274
+           Callout Reason: callflow:1019
+           Location Info: callflow:1232
+           Wait/30-sec: callflow:1265
+           Not Home: callflow:1017
+           Available Check: callflow:1316
+           Accept: callflow:1167
+           Decline: callflow:1021
+           Qualified No: callflow:1266
+           Goodbye: callflow:1029
+           Error: callflow:1351
 
-        2. Audio Prompts:
-           Use exact callflow IDs:
-           - 1001: Welcome/initial message
-           - 1008: PIN entry request
-           - 1009: Invalid input/retry
-           - 1010: Timeout message
-           - 1167: Accept response
-           - 1021: Decline response
-           - 1266: Qualified no response
-           - 1274: Electric callout info
-           - 1019: Callout reason
-           - 1232: Location information
-           - 1265: Wait message
-           - 1017: Not home message
-           - 1316: Availability check
-           - 1029: Goodbye message
-           - 1351: Error message
+        3. Response Code Standards:
+           Accept: SaveCallResult [1001, "Accept"]
+           Decline: SaveCallResult [1002, "Decline"]
+           Not Home: SaveCallResult [1006, "NotHome"]
+           Qualified No: SaveCallResult [1145, "QualNo"]
+           Error: SaveCallResult [1198, "Error Out"]
 
-        3. Input Handling:
-           For getDigits nodes:
+        4. Required Node Structure Example:
+           Welcome/Menu Node:
            {{
-             "numDigits": <number>,
-             "maxTries": <number>,
-             "validChoices": "1|2|3",
-             "errorPrompt": "callflow:1009",
-             "timeoutPrompt": "callflow:1010"
+             "label": "Welcome",
+             "log": "Initial greeting",
+             "playPrompt": ["callflow:1001"],
+             "getDigits": {{
+               "numDigits": 1,
+               "maxTries": 3,
+               "validChoices": "1|3|7|9",
+               "errorPrompt": "callflow:1009",
+               "timeoutPrompt": "callflow:1010"
+             }},
+             "branch": {{
+               "1": "EnterPin",
+               "3": "NeedMoreTime",
+               "7": "NotHome",
+               "9": "Welcome"
+             }}
            }}
 
-        4. Call Flow Control:
-           - Use "branch" for conditional paths
-           - Use "goto" for direct transitions
-           - Use "gosub" for subroutines like SaveCallResult
-           - Include retry logic with maxLoop
-           - Handle timeouts and errors
-
-        5. Standard Response Codes:
-           SaveCallResult parameters:
-           - Accept: [1001, "Accept"]
-           - Decline: [1002, "Decline"]
-           - Not Home: [1006, "NotHome"]
-           - Qualified No: [1145, "QualNo"]
-           - Error: [1198, "Error Out"]
+        5. CRITICAL: Match these exact patterns:
+           - PIN verification needs both digit entry and validation checks
+           - Error handling must include retry paths
+           - Maintain all timeout and retry logic
+           - Every path must be preserved exactly as shown
+           - Response nodes must have correct SaveCallResult commands
+           - All prompts must match the exact text shown
 
         Here's the Mermaid diagram to convert:
 
         {mermaid_code}
 
-        Generate a complete IVR configuration that exactly matches this flow pattern.
-        Return only the JavaScript code in the format:
-        module.exports = [ ... ];"""
+        Create an IVR configuration that matches this flow EXACTLY, with every node, path, and option preserved.
+        Return only the JavaScript code in module.exports format."""
 
         try:
             response = self.client.chat.completions.create(
@@ -90,7 +92,7 @@ class OpenAIIVRConverter:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an expert IVR system developer specialized in creating precise IVR configurations with specific callflow IDs and control structures."
+                        "content": "You are an expert IVR system developer specialized in creating exact 1:1 IVR configurations from flowcharts. Every node and path must be preserved precisely."
                     },
                     {
                         "role": "user",
@@ -122,6 +124,17 @@ class OpenAIIVRConverter:
                 for node in nodes:
                     if not isinstance(node, dict) or 'label' not in node:
                         raise ValueError("Invalid node structure")
+                    
+                    # Verify required properties based on node type
+                    if "getDigits" in node:
+                        required_props = ["numDigits", "maxTries", "errorPrompt"]
+                        if not all(prop in node["getDigits"] for prop in required_props):
+                            raise ValueError(f"Missing required getDigits properties in node {node['label']}")
+                    
+                    # Verify correct audio prompts
+                    if "playPrompt" in node and not all(p.startswith("callflow:") for p in node["playPrompt"]):
+                        raise ValueError(f"Invalid audio prompt format in node {node['label']}")
+
             except json.JSONDecodeError:
                 raise ValueError("Generated code is not valid JSON")
 
@@ -138,6 +151,18 @@ class OpenAIIVRConverter:
     "goto": "Goodbye"
   }
 ];'''
+
+    def _validate_flow_completeness(self, nodes: List[Dict]) -> bool:
+        """Validate that all required nodes and paths are present"""
+        required_nodes = {
+            "Welcome", "EnterPin", "InvalidEntry", "ElectricCallout",
+            "CalloutReason", "TroubleLocation", "CustomMessage",
+            "AvailableForCallout", "AcceptedResponse", "CalloutDecline",
+            "QualifiedNo", "Goodbye"
+        }
+        
+        node_labels = {node["label"] for node in nodes}
+        return required_nodes.issubset(node_labels)
 
 def convert_mermaid_to_ivr(mermaid_code: str, api_key: str) -> str:
     """Wrapper function for Mermaid to IVR conversion"""
