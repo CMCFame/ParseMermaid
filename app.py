@@ -12,9 +12,69 @@ from parse_mermaid import parse_mermaid, MermaidParser
 from graph_to_ivr import graph_to_ivr, IVRTransformer
 from openai_converter import process_flow_diagram
 
-# ... (previous imports and configurations remain the same)
+# Define DEFAULT_FLOWS before using it
+DEFAULT_FLOWS = {
+    "Simple Callout": '''flowchart TD
+    A["Start of Call"] --> B{"Are you available?"}
+    B -->|"1 - Yes"| C["Accept Callout"]
+    B -->|"3 - No"| D["Decline Callout"]
+    C --> E["Record Response"]
+    D --> E
+    E --> F["End Call"]''',
+    
+    "PIN Change Flow": '''flowchart TD
+    A["Enter Current PIN"] --> B{"PIN Correct?"}
+    B -->|"Yes"| C["Enter New PIN"]
+    B -->|"No"| D["Access Denied"]
+    C --> E{"Confirm New PIN"}
+    E -->|"Match"| F["PIN Updated Successfully"]
+    E -->|"No Match"| G["PIN Change Failed"]
+    D --> H["End"]
+    F --> H
+    G --> H''',
+    
+    "Transfer Request": '''flowchart TD
+    A["Transfer Request"] --> B{"Transfer Possible?"}
+    B -->|"Yes"| C["Initiate Transfer"]
+    B -->|"No"| D["Transfer Denied"]
+    C --> E["Confirm Transfer"]
+    D --> F["End Call"]
+    E --> F'''
+}
+
+def save_temp_file(content: str, suffix: str = '.js') -> str:
+    """Save content to a temporary file"""
+    with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as f:
+        f.write(content)
+        return f.name
+
+def validate_mermaid(mermaid_text: str) -> Optional[str]:
+    """Validate Mermaid diagram syntax"""
+    try:
+        parser = MermaidParser()
+        parser.parse(mermaid_text)
+        return None
+    except Exception as e:
+        return f"Diagram Validation Error: {str(e)}"
+
+def format_ivr_code(ivr_nodes: list, format_type: str = 'javascript') -> str:
+    """Format IVR nodes to specified output format"""
+    if format_type == 'javascript':
+        return "module.exports = " + json.dumps(ivr_nodes, indent=2) + ";"
+    elif format_type == 'json':
+        return json.dumps(ivr_nodes, indent=2)
+    elif format_type == 'yaml':
+        return yaml.dump(ivr_nodes, allow_unicode=True)
+    else:
+        raise ValueError(f"Unsupported format: {format_type}")
 
 def main():
+    st.set_page_config(
+        page_title="Mermaid-to-IVR Converter",
+        page_icon="🔄",
+        layout="wide"
+    )
+
     st.title("🔄 Mermaid-to-IVR Converter")
     st.markdown("""
     Convert flowcharts to Interactive Voice Response (IVR) JavaScript configurations.
