@@ -89,20 +89,36 @@ class FlowchartConverter:
                 messages=[
                     {
                         "role": "system",
-                        "content": """You are an expert at converting complex flowcharts and call flows into precise Mermaid diagram syntax. 
-                        Generate a clean, executable Mermaid flowchart that accurately represents the input diagram.
-                        
-                        Requirements:
-                        - Use 'flowchart TD' as the first line
-                        - Node IDs should be unique (A1, B1, etc.)
-                        - Use descriptive node texts
-                        - Capture all connections and decision paths
-                        - Use arrow styles that match the original diagram's flow"""
+                        "content": """You are an expert Mermaid diagram generator specializing in complex flowchart conversions. 
+
+STRICT MERMAID SYNTAX RULES:
+1. Always start with 'flowchart TD' for top-down flow
+2. Use unique node IDs (A1, B1, C1, etc.)
+3. Node text formatting:
+   - Use \n for multi-line text
+   - Escape special characters
+   - Enclose text in square brackets with quotes
+4. Connection syntax:
+   - Use --> for standard connections
+   - Use -->| | for labeled connections
+   - Handle retry and alternative paths
+5. Decision nodes use {} syntax
+6. Ensure all paths are connected
+7. Preserve all original flow details
+8. Handle nested conditions and multiple paths
+9. Use escape characters for parentheses and special symbols
+
+ADDITIONAL GUIDELINES:
+- Maintain original diagram's logical flow
+- Include all decision points
+- Preserve original messaging
+- Add retry and error handling paths
+- Use descriptive, clear node labels"""
                     },
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "Convert this diagram to Mermaid syntax"},
+                            {"type": "text", "text": "Convert this complex call flow diagram to precise Mermaid syntax. Ensure every detail is captured accurately."},
                             {
                                 "type": "image_url", 
                                 "image_url": {
@@ -113,7 +129,7 @@ class FlowchartConverter:
                     }
                 ],
                 max_tokens=4096,
-                temperature=0.2
+                temperature=0.1  # More deterministic
             )
             
             # Extract Mermaid code
@@ -143,5 +159,4 @@ def process_flow_diagram(file_path: str, api_key: Optional[str] = None) -> str:
         converter = FlowchartConverter(api_key)
         return converter.convert_diagram(file_path)
     except Exception as e:
-        st.error(f"Diagram conversion error: {e}")
-        return ""
+        raise RuntimeError(f"Diagram conversion error: {e}")

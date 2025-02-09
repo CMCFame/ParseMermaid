@@ -227,7 +227,11 @@ def main():
         st.subheader("👁️ Preview")
         try:
             if mermaid_text:
-                st_mermaid.st_mermaid(mermaid_text)
+                try:
+                    st_mermaid.st_mermaid(mermaid_text)
+                except Exception as preview_error:
+                    st.error(f"Mermaid Preview Error: {preview_error}")
+                    st.code(mermaid_text, language="mermaid")
         except Exception as e:
             st.error(f"Preview Error: {e}")
 
