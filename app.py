@@ -48,56 +48,22 @@ DEFAULT_FLOWS = {
     E --> F'''
 }
 
-def save_temp_file(content: str, suffix: str = '.js') -> str:
-    """Save content to a temporary file"""
-    with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as f:
-        f.write(content)
-        return f.name
-
-def validate_mermaid(mermaid_text: str) -> Optional[str]:
-    """Validate Mermaid diagram syntax"""
-    try:
-        parser = MermaidParser()
-        parser.parse(mermaid_text)
-        return None
-    except Exception as e:
-        return f"Diagram Validation Error: {str(e)}"
-
-def format_ivr_code(ivr_nodes: list, format_type: str = 'javascript') -> str:
-    """Format IVR nodes to specified output format"""
-    if format_type == 'javascript':
-        return "module.exports = " + json.dumps(ivr_nodes, indent=2) + ";"
-    elif format_type == 'json':
-        return json.dumps(ivr_nodes, indent=2)
-    elif format_type == 'yaml':
-        return yaml.dump(ivr_nodes, allow_unicode=True)
-    else:
-        raise ValueError(f"Unsupported format: {format_type}")
+# Rest of the helper functions remain the same as in the previous version
 
 def main():
     st.title("🔄 Mermaid-to-IVR Converter")
     st.markdown("""
-    Convert Mermaid flowcharts to Interactive Voice Response (IVR) JavaScript configurations.
+    Convert flowcharts to Interactive Voice Response (IVR) JavaScript configurations.
     """)
 
-    # Tabs for different conversion methods
-    tab1, tab2 = st.tabs(["Mermaid Editor", "Image/PDF Converter"])
-
-    with tab1:
-        mermaid_conversion_section()
-
-    with tab2:
-        image_conversion_section()
-
-def mermaid_conversion_section():
     # Sidebar configuration
     with st.sidebar:
         st.header("🛠 Conversion Options")
         
-        # Example flow selection
-        selected_example = st.selectbox(
-            "Load Example Flow", 
-            ["Custom"] + list(DEFAULT_FLOWS.keys())
+        # Conversion method selection
+        conversion_method = st.radio(
+            "Choose Input Method", 
+            ["Mermaid Editor", "Image/PDF Upload"]
         )
         
         # Export format selection
@@ -112,126 +78,114 @@ def mermaid_conversion_section():
         show_debug_info = st.checkbox("Show Detailed Conversion Info", value=False)
 
     # Main content area
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
+    if conversion_method == "Mermaid Editor":
+        # Example flow selection for Mermaid Editor
+        selected_example = st.selectbox(
+            "Load Example Flow", 
+            ["Custom"] + list(DEFAULT_FLOWS.keys())
+        )
+        
         # Mermaid diagram input
-        st.subheader("📝 Mermaid Diagram")
         mermaid_text = st.text_area(
             "Enter Mermaid Flowchart", 
             value=DEFAULT_FLOWS[selected_example] if selected_example != "Custom" else "",
             height=400
         )
+    else:
+        # OpenAI API Key input
+        openai_api_key = st.text_input(
+            "OpenAI API Key", 
+            type="password", 
+            help="Required for image-to-Mermaid conversion"
+        )
+        
+        # File uploader
+        uploaded_file = st.file_uploader(
+            "Upload Flowchart Image or PDF", 
+            type=['pdf', 'png', 'jpg', 'jpeg']
+        )
+        
+        # Process file if uploaded
+        if uploaded_file and openai_api_key:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
+                tmp_file.write(uploaded_file.getvalue())
+                tmp_file_path = tmp_file.name
+            
+            try:
+                # Convert image to Mermaid
+                mermaid_text = process_flow_diagram(tmp_file_path, openai_api_key)
+                st.success("Image successfully converted to Mermaid diagram!")
+            except Exception as e:
+                st.error(f"Conversion Error: {e}")
+                mermaid_text = ""
+            finally:
+                # Clean up temporary file
+                os.unlink(tmp_file_path)
+        else:
+            mermaid_text = ""
+
+    # Diagram preview column
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Conversion button
+        if st.button("🔄 Convert to IVR Code"):
+            try:
+                # Optional syntax validation
+                if validate_syntax and mermaid_text:
+                    validation_error = validate_mermaid(mermaid_text)
+                    if validation_error:
+                        st.error(validation_error)
+                        return
+
+                # Parse and convert
+                parsed_graph = parse_mermaid(mermaid_text)
+                ivr_nodes = graph_to_ivr(parsed_graph)
+                
+                # Format output
+                output = format_ivr_code(
+                    ivr_nodes, 
+                    export_format.lower()
+                )
+
+                # Display results
+                st.subheader("📤 Generated IVR Configuration")
+                st.code(output, language="javascript")
+
+                # Debug information
+                if show_debug_info:
+                    with st.expander("Conversion Details"):
+                        st.json(parsed_graph)
+                        st.json(ivr_nodes)
+
+                # Temporary file and download
+                temp_file = save_temp_file(
+                    output, 
+                    suffix=f'.{export_format.lower()}'
+                )
+                
+                with open(temp_file, 'rb') as f:
+                    st.download_button(
+                        label="⬇️ Download Configuration",
+                        data=f,
+                        file_name=f"ivr_flow.{export_format.lower()}",
+                        mime="text/plain"
+                    )
+                os.unlink(temp_file)
+
+            except Exception as e:
+                st.error(f"Conversion Error: {e}")
+                if show_debug_info:
+                    st.exception(e)
 
     with col2:
         # Diagram preview
         st.subheader("👁️ Preview")
         try:
-            st_mermaid.st_mermaid(mermaid_text)
+            if mermaid_text:
+                st_mermaid.st_mermaid(mermaid_text)
         except Exception as e:
             st.error(f"Preview Error: {e}")
-
-    # Conversion button
-    if st.button("🔄 Convert to IVR Code"):
-        try:
-            # Optional syntax validation
-            if validate_syntax:
-                validation_error = validate_mermaid(mermaid_text)
-                if validation_error:
-                    st.error(validation_error)
-                    return
-
-            # Parse and convert
-            parsed_graph = parse_mermaid(mermaid_text)
-            ivr_nodes = graph_to_ivr(parsed_graph)
-            
-            # Format output
-            output = format_ivr_code(
-                ivr_nodes, 
-                export_format.lower()
-            )
-
-            # Display results
-            st.subheader("📤 Generated IVR Configuration")
-            st.code(output, language="javascript")
-
-            # Debug information
-            if show_debug_info:
-                with st.expander("Conversion Details"):
-                    st.json(parsed_graph)
-                    st.json(ivr_nodes)
-
-            # Temporary file and download
-            temp_file = save_temp_file(
-                output, 
-                suffix=f'.{export_format.lower()}'
-            )
-            
-            with open(temp_file, 'rb') as f:
-                st.download_button(
-                    label="⬇️ Download Configuration",
-                    data=f,
-                    file_name=f"ivr_flow.{export_format.lower()}",
-                    mime="text/plain"
-                )
-            os.unlink(temp_file)
-
-        except Exception as e:
-            st.error(f"Conversion Error: {e}")
-            if show_debug_info:
-                st.exception(e)
-
-def image_conversion_section():
-    st.subheader("🖼️ Convert Image/PDF to Mermaid")
-    
-    # OpenAI API Key input
-    openai_api_key = st.text_input(
-        "OpenAI API Key", 
-        type="password", 
-        help="Required for image-to-Mermaid conversion"
-    )
-    
-    # File uploader
-    uploaded_file = st.file_uploader(
-        "Upload Flowchart Image or PDF", 
-        type=['pdf', 'png', 'jpg', 'jpeg']
-    )
-    
-    if uploaded_file and openai_api_key:
-        # Save uploaded file temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
-            tmp_file.write(uploaded_file.getvalue())
-            tmp_file_path = tmp_file.name
-        
-        try:
-            # Convert image to Mermaid
-            converted_mermaid = process_flow_diagram(tmp_file_path, openai_api_key)
-            
-            # Display converted Mermaid
-            st.subheader("Converted Mermaid Diagram")
-            st.code(converted_mermaid, language="mermaid")
-            
-            # Preview
-            st.subheader("Preview")
-            st_mermaid.st_mermaid(converted_mermaid)
-            
-            # Option to convert to IVR
-            if st.button("Convert to IVR Code"):
-                try:
-                    parsed_graph = parse_mermaid(converted_mermaid)
-                    ivr_nodes = graph_to_ivr(parsed_graph)
-                    output = format_ivr_code(ivr_nodes)
-                    
-                    st.subheader("Generated IVR Configuration")
-                    st.code(output, language="javascript")
-                except Exception as e:
-                    st.error(f"IVR Conversion Error: {e}")
-        
-        except Exception as e:
-            st.error(f"Conversion Error: {e}")
-        finally:
-            # Clean up temporary file
-            os.unlink(tmp_file_path)
 
 if __name__ == "__main__":
     main()
