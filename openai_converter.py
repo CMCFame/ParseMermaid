@@ -77,14 +77,14 @@ STRICT FORMAT:
 1. Always start with 'flowchart TD'
 2. Enclose node text in square brackets: ["Node Text"]
 3. Use curly brackets {} for decision nodes
-4. Preserve structure and connections
-5. No unnecessary whitespace or syntax errors
+4. Ensure all edges are properly formatted
+5. Remove unnecessary line breaks and escape sequences
                         """
                     },
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "Convert this call flow diagram into Mermaid syntax. Ensure 100% correct formatting."},
+                            {"type": "text", "text": "Convert this call flow diagram into Mermaid syntax. Ensure correct formatting and structure."},
                             {
                                 "type": "image_url", 
                                 "image_url": {
@@ -110,6 +110,8 @@ STRICT FORMAT:
         mermaid_text = re.sub(r'\\n', '\\n', mermaid_text)  # Ensure proper line breaks
         mermaid_text = re.sub(r'\b(if|decision|question)\b', r'{\1}', mermaid_text, flags=re.IGNORECASE)
         mermaid_text = re.sub(r'\[([^\]]+)\]', r'["\1"]', mermaid_text)  # Ensure square brackets
+        mermaid_text = re.sub(r'\{([^{}]+)\}', r'{\1}', mermaid_text)  # Fix decision nodes
+        mermaid_text = re.sub(r'-->\|([^|]+)\|', r'-->|\1|', mermaid_text)  # Fix edge formatting
         return mermaid_text
 
 def process_flow_diagram(file_path: str, api_key: Optional[str] = None) -> str:
