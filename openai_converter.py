@@ -91,37 +91,38 @@ class FlowchartConverter:
                         "role": "system",
                         "content": """You are an expert Mermaid diagram generator specializing in complex flowchart conversions. 
 
-MERMAID SYNTAX GUIDELINES:
+MERMAID SYNTAX STRICT REQUIREMENTS:
 1. Always start with 'flowchart TD'
-2. Use unique node IDs (A1, B1, C1, etc.)
-3. Node Text Formatting:
+2. Node Formatting:
+   - Use unique node IDs (A1, B1, C1)
+   - Enclose node text in square brackets with quotes
    - Use <br> for line breaks
-   - Escape special characters
-   - Enclose text in square brackets with quotes
-4. Connection Syntax:
+3. Node Connections:
    - Standard connection: -->
-   - Labeled connection: -->| label |
-   - Capture all paths, including error and retry flows
-5. Decision Nodes:
-   - Use {} for decision/diamond nodes
-6. Preserve Complete Flow:
-   - Capture all decision points
-   - Include all original messaging
-   - Maintain logical flow
-7. Handle:
-   - Retry paths
-   - Invalid inputs
-   - Alternative routes
+   - Labeled connection: -->|"label"|
+4. Decision Nodes:
+   - Use {} for diamond/decision nodes
+5. Capture Complete Flow:
+   - Include all paths
+   - Show retry and error handling
+   - Maintain original diagram's logic
+6. Syntax Precision:
+   - No syntax errors
+   - Clear, logical flow
+   - Readable node labels
 
-CRITICAL REQUIREMENTS:
-- 100% Accuracy to Source Diagram
-- No Information Loss
-- Exact Path Replication"""
+OUTPUT EXAMPLE:
+```mermaid
+flowchart TD
+    A1["Start Node"] -->|"Label"| B1{"Decision Node"}
+    B1 -->|"Yes"| C1["Success Node"]
+    B1 -->|"No"| D1["Error Node"]
+```"""
                     },
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "Convert this complex call flow diagram to precise Mermaid syntax."},
+                            {"type": "text", "text": "Convert this complex call flow diagram to precise Mermaid syntax. Ensure 100% accuracy and readability."},
                             {
                                 "type": "image_url", 
                                 "image_url": {
@@ -138,11 +139,16 @@ CRITICAL REQUIREMENTS:
             # Extract Mermaid code
             mermaid_text = response.choices[0].message.content.strip()
             
-            # Clean up potential code block markers
-            mermaid_text = re.sub(r'^```(mermaid)?|```$', '', mermaid_text, flags=re.MULTILINE).strip()
+            # Clean up code block markers and extract Mermaid content
+            mermaid_match = re.search(r'```mermaid\n(.*?)```', mermaid_text, re.DOTALL)
+            if mermaid_match:
+                mermaid_text = mermaid_match.group(1).strip()
             
             # Ensure starts with flowchart definition
-            return mermaid_text if mermaid_text.startswith('flowchart') else f'flowchart TD\n{mermaid_text}'
+            if not mermaid_text.startswith('flowchart TD'):
+                mermaid_text = f'flowchart TD\n{mermaid_text}'
+            
+            return mermaid_text
         
         except Exception as e:
             self.logger.error(f"Conversion failed: {e}")

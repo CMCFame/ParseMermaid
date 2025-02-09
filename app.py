@@ -78,21 +78,22 @@ def render_mermaid_safely(mermaid_text: str):
         
         # Attempt rendering with custom HTML and JavaScript
         st.markdown(f"""
-        <div id="mermaid-container"></div>
+        <div id="mermaid-container" style="width: 100%; overflow-x: auto;"></div>
         <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
         <script>
-        try {{
-            mermaid.initialize({{startOnLoad:false}});
-            const container = document.getElementById('mermaid-container');
-            const insertSvg = function(svgCode, bindFunctions) {{
-                container.innerHTML = svgCode;
-            }};
-            
-            const graphDefinition = `{mermaid_text}`;
-            mermaid.render('mermaidGraph', graphDefinition, insertSvg);
-        }} catch (error) {{
-            console.error('Mermaid rendering error:', error);
-        }}
+        document.addEventListener('DOMContentLoaded', function() {{
+            try {{
+                mermaid.initialize({{startOnLoad:false}});
+                const container = document.getElementById('mermaid-container');
+                
+                mermaid.render('mermaidGraph', `{mermaid_text}`, function(svgCode) {{
+                    container.innerHTML = svgCode;
+                }}, container);
+            }} catch (error) {{
+                console.error('Mermaid rendering error:', error);
+                container.innerHTML = '<pre>' + error.message + '</pre>';
+            }}
+        }});
         </script>
         """, unsafe_allow_html=True)
     except Exception as e:
