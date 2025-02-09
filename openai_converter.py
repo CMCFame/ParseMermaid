@@ -6,7 +6,7 @@ import base64
 import io
 
 import streamlit as st
-import openai  # Make sure you have openai installed
+import openai
 from pdf2image import convert_from_path
 from PIL import Image
 
@@ -50,7 +50,6 @@ class FlowchartConverter:
         """Convert PDF's first page to base64 image"""
         try:
             images = convert_from_path(pdf_path, first_page=1, last_page=1)
-            
             if not images:
                 raise ValueError("No images extracted from PDF")
             
@@ -65,9 +64,9 @@ class FlowchartConverter:
 
     def convert_diagram(self, file_path: str) -> str:
         """
-        Convert flow diagram to Mermaid syntax
-        
-        Supports PDF and image files
+        Convert flow diagram to Mermaid syntax.
+        Supports PDF and image files.
+        Uses model="gpt-4o" under openai==0.28.0
         """
         # Validate file
         if not os.path.exists(file_path):
@@ -83,34 +82,29 @@ class FlowchartConverter:
             else self._encode_image(file_path)
         )
         
-        # ### CHANGE: Revised system prompt for stricter rules
+        # System instructions for mermaid generation
         system_instructions = """You are an expert Mermaid diagram generator. 
-        Your task: 
-        1. Perform OCR or otherwise interpret the provided image of a flowchart. 
-        2. Output a strictly valid Mermaid flowchart with no syntax errors. 
-        3. Always enclose the result in triple backticks ```mermaid ... ``` and begin with `flowchart TD`.
-        4. For each node:
-           - Use unique IDs (A1, B1, C1, etc.). 
-           - Enclose node text in square brackets "[ ... ]" or curly braces "{ ... }" if it's a decision. 
-           - Retain original text as much as possible without paraphrasing. 
-        5. For edges:
-           - Keep label text EXACTLY as in the diagram (like "1 - Yes", "2 - No", etc.). 
-           - Use the syntax -->|"label"| for labeled edges, and --> for unlabeled edges. 
-        6. Ensure it starts with: flowchart TD
-        7. Provide no additional commentary outside the mermaid code block.
-        """
+1. Interpret the provided flowchart image (base64).
+2. Output a valid Mermaid flowchart with no syntax errors.
+3. Always enclose the code in triple backticks (```mermaid ... ```).
+4. Start with 'flowchart TD'.
+5. Use unique node IDs (A1, B1, C1, etc.).
+6. Retain original text from the flowchart as best you can without paraphrasing.
+7. Label edges exactly as in the diagram, e.g. -->|"1 - Yes"| or --> for unlabeled edges.
+"""
 
         messages = [
             {"role": "system", "content": system_instructions},
             {
                 "role": "user",
-                "content": f"Please convert this flowchart image into Mermaid code. The image is base64-encoded:\n\ndata:image/png;base64,{base64_image}"
+                "content": f"Convert this flowchart image (base64) to Mermaid:\n\ndata:image/png;base64,{base64_image}"
             }
         ]
 
         try:
+            # Using pinned openai==0.28.0 => ChatCompletion.create is still valid
             response = openai.ChatCompletion.create(
-                model="gpt-4o",  # or "gpt-3.5-turbo" if GPT-4 is unavailable
+                model="gpt-4o",  # Your custom GPT-4-like model name
                 messages=messages,
                 max_tokens=2048,
                 temperature=0.0
@@ -124,7 +118,7 @@ class FlowchartConverter:
             if mermaid_match:
                 mermaid_text = mermaid_match.group(1).strip()
             else:
-                # If GPT didn't wrap in code fences, fallback
+                # If GPT didn't wrap in code fences, fallback to entire text
                 mermaid_text = raw_response
 
             # Ensure it starts with flowchart TD
@@ -139,7 +133,8 @@ class FlowchartConverter:
 
 def process_flow_diagram(file_path: str, api_key: Optional[str] = None) -> str:
     """
-    Wrapper function for file diagram conversion
+    Wrapper function for file diagram conversion.
+    Pins openai==0.28.0 and uses "gpt-4o".
     
     Args:
         file_path: Path to diagram file (PDF or image)

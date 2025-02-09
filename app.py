@@ -12,7 +12,7 @@ from parse_mermaid import parse_mermaid, MermaidParser
 from graph_to_ivr import graph_to_ivr, IVRTransformer
 from openai_converter import process_flow_diagram
 
-# Define DEFAULT_FLOWS before using it
+# Example flows for the Mermaid Editor
 DEFAULT_FLOWS = {
     "Simple Callout": '''flowchart TD
     A["Start of Call"] --> B{"Are you available?"}
@@ -60,6 +60,7 @@ def validate_mermaid(mermaid_text: str) -> Optional[str]:
 def format_ivr_code(ivr_nodes: list, format_type: str = 'javascript') -> str:
     """Format IVR nodes to specified output format"""
     if format_type == 'javascript':
+        import json
         return "module.exports = " + json.dumps(ivr_nodes, indent=2) + ";"
     elif format_type == 'json':
         return json.dumps(ivr_nodes, indent=2)
@@ -109,66 +110,56 @@ def main():
 
     st.title("🔄 Mermaid-to-IVR Converter")
     st.markdown("""
-    Convert flowcharts to Interactive Voice Response (IVR) JavaScript configurations.
+    Convert flowcharts (PDF/image or direct Mermaid code) to IVR configurations. 
+    **This version pins openai==0.28.0** so we can use `gpt-4o` without migration errors.
     """)
 
-    # Sidebar configuration
     with st.sidebar:
         st.header("🛠 Conversion Options")
         
-        # Conversion method selection
         conversion_method = st.radio(
             "Choose Input Method", 
             ["Mermaid Editor", "Image/PDF Upload"]
         )
         
-        # Export format selection
         export_format = st.radio(
             "Export Format", 
             ["JavaScript", "JSON", "YAML"]
         )
         
-        # Advanced options
         st.subheader("Advanced Settings")
         validate_syntax = st.checkbox("Validate Diagram", value=True)
         show_debug_info = st.checkbox("Show Detailed Conversion Info", value=False)
 
-    # Main content area
     mermaid_text = ""
 
     if conversion_method == "Mermaid Editor":
-        # Example flow selection for Mermaid Editor
         selected_example = st.selectbox(
             "Load Example Flow", 
             ["Custom"] + list(DEFAULT_FLOWS.keys())
         )
         
-        # Mermaid diagram input
         mermaid_text = st.text_area(
             "Enter or Edit Mermaid Flowchart", 
             value=DEFAULT_FLOWS[selected_example] if selected_example != "Custom" else "",
             height=400
         )
     else:
-        # Image/PDF Upload Section
+        # Image/PDF Upload
         col1, col2 = st.columns(2)
         
         with col1:
-            # OpenAI API Key input
             openai_api_key = st.text_input(
                 "OpenAI API Key", 
                 type="password", 
-                help="Required for image-to-Mermaid conversion"
+                help="Required for image-to-Mermaid conversion. Using gpt-4o."
             )
-            
-            # File uploader
             uploaded_file = st.file_uploader(
                 "Upload Flowchart Image or PDF", 
                 type=['pdf', 'png', 'jpg', 'jpeg']
             )
         
         with col2:
-            # Image preview
             if uploaded_file:
                 try:
                     image = Image.open(uploaded_file)
@@ -183,7 +174,6 @@ def main():
                     tmp_file_path = tmp_file.name
                 
                 try:
-                    # Convert image to Mermaid
                     mermaid_text = process_flow_diagram(tmp_file_path, openai_api_key)
                     
                     st.subheader("AI-Generated Mermaid Diagram")
@@ -196,42 +186,31 @@ def main():
                 finally:
                     os.unlink(tmp_file_path)
 
-    # ### CHANGE: Added a second text area to let the user override/fix Mermaid if needed
+    # Optional override text area to fix AI mistakes
     if mermaid_text:
         st.subheader("Edit Mermaid Code Before Parsing")
         mermaid_text = st.text_area("Override / Fine-tune the Mermaid code", mermaid_text, height=300)
 
-    # Diagram preview column
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        # Conversion button
         if st.button("➡ Convert to IVR Code"):
             try:
-                # Optional syntax validation
                 if validate_syntax and mermaid_text:
                     validation_error = validate_mermaid(mermaid_text)
                     if validation_error:
                         st.error(validation_error)
                         return
 
-                # Parse and convert
                 parsed_graph = parse_mermaid(mermaid_text)
                 ivr_nodes = graph_to_ivr(parsed_graph)
                 
-                # Format output
-                output = format_ivr_code(
-                    ivr_nodes, 
-                    export_format.lower()
-                )
+                output = format_ivr_code(ivr_nodes, export_format.lower())
 
-                # Display results
                 st.subheader("📤 Generated IVR Configuration")
-                # Show JavaScript as default for code block syntax highlighting
                 syntax_lang = "javascript" if export_format.lower() == "javascript" else export_format.lower()
                 st.code(output, language=syntax_lang)
 
-                # Debug information
                 if show_debug_info:
                     with st.expander("Conversion Details"):
                         st.write("**Parsed Graph**")
@@ -239,12 +218,7 @@ def main():
                         st.write("**IVR Nodes**")
                         st.json(ivr_nodes)
 
-                # Temporary file and download
-                temp_file = save_temp_file(
-                    output, 
-                    suffix=f'.{export_format.lower()}'
-                )
-                
+                temp_file = save_temp_file(output, suffix=f'.{export_format.lower()}')
                 with open(temp_file, 'rb') as f:
                     st.download_button(
                         label="⬇️ Download Configuration",
@@ -260,7 +234,6 @@ def main():
                     st.exception(e)
 
     with col2:
-        # Diagram preview
         st.subheader("👁️ Preview")
         try:
             if mermaid_text:

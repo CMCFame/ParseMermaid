@@ -5,17 +5,17 @@ from parse_mermaid import Node, Edge, NodeType
 class AudioPrompts:
     """Comprehensive audio prompt mapping"""
     PROMPTS = {
-        # Generic prompts
+        # Generic
         'default': "callflow:1009",
-        
-        # Specific node type prompts
+
+        # Specific node types
         NodeType.START: "callflow:1001",
         NodeType.END: "callflow:1029",
         NodeType.DECISION: "callflow:1010",
         NodeType.INPUT: "callflow:1008",
         NodeType.TRANSFER: "callflow:1645",
-        
-        # Action-specific prompts
+
+        # Action-specific
         'availability': "callflow:1677",
         'pin_change': "callflow:1051",
         'test_number': "callflow:1678",
@@ -24,7 +24,6 @@ class AudioPrompts:
 
 class IVRTransformer:
     def __init__(self):
-        # Configurable standard nodes
         self.standard_nodes = {
             "start": {
                 "label": "Start",
@@ -47,23 +46,13 @@ class IVRTransformer:
         }
 
     def transform(self, graph: Dict) -> List[Dict[str, Any]]:
-        """
-        Transform parsed graph into IVR flow
-        
-        Args:
-            graph (Dict): Parsed Mermaid graph structure
-        
-        Returns:
-            List[Dict]: Transformed IVR nodes
-        """
         nodes = graph['nodes']
         edges = graph['edges']
         
         ivr_nodes = []
         
-        # Add standard "start" node if not present
-        has_start = any(n.node_type == NodeType.START for n in nodes.values())
-        if not has_start:
+        # Add standard start if missing
+        if not any(n.node_type == NodeType.START for n in nodes.values()):
             ivr_nodes.append(self.standard_nodes['start'])
         
         # Transform each node
@@ -86,7 +75,6 @@ class IVRTransformer:
             'log': node.raw_text
         }
 
-        # Node type-specific transformations
         if node.node_type == NodeType.DECISION:
             self._handle_decision_node(ivr_node, node, edges)
         elif node.node_type == NodeType.INPUT:
@@ -94,7 +82,7 @@ class IVRTransformer:
         elif node.node_type == NodeType.TRANSFER:
             self._handle_transfer_node(ivr_node)
         elif node.node_type == NodeType.END:
-            # We might skip if we rely on a standard "Goodbye" node, but let's keep a minimal config
+            # Minimal node if we detect an END
             ivr_node['playPrompt'] = [AudioPrompts.PROMPTS[NodeType.END]]
             ivr_node['goto'] = "Goodbye"
         else:
@@ -104,7 +92,6 @@ class IVRTransformer:
 
     def _handle_decision_node(self, ivr_node: Dict, node: Node, edges: List[Edge]):
         out_edges = [e for e in edges if e.from_id == node.id]
-        
         ivr_node.update({
             'playPrompt': [AudioPrompts.PROMPTS[NodeType.DECISION]],
             'getDigits': {
@@ -117,22 +104,17 @@ class IVRTransformer:
         branch_map = {}
         for edge in out_edges:
             label = edge.label.strip() if edge.label else ""
-            # ### CHANGE: More robust digit extraction
-            # E.g. "1 - Yes", "Press 1 - Transfer", "1) Accept"
             digit_match = re.match(r'(?:press\s*)?(\d+)', label, re.IGNORECASE)
             if digit_match:
                 digit = digit_match.group(1)
                 branch_map[digit] = self._format_label(edge.to_id)
             else:
-                # If no digit found, handle "error" or skip
-                # but let's add a fallback if label says "no" or "yes" without a number
-                # This is optional logic you can refine
+                # fallback if no digit found
                 if "yes" in label.lower():
                     branch_map["1"] = self._format_label(edge.to_id)
                 elif "no" in label.lower():
                     branch_map["2"] = self._format_label(edge.to_id)
                 else:
-                    # Fallback to error or put the entire label as a single digit?
                     branch_map["error"] = self._format_label(edge.to_id)
 
         if branch_map:
@@ -142,7 +124,7 @@ class IVRTransformer:
         ivr_node.update({
             'playPrompt': [AudioPrompts.PROMPTS[NodeType.INPUT]],
             'getDigits': {
-                'numDigits': 4,  # typical for PIN
+                'numDigits': 4,  # typical PIN or input
                 'maxTries': 3,
                 'errorPrompt': AudioPrompts.PROMPTS['default']
             }
@@ -160,23 +142,19 @@ class IVRTransformer:
         if audio_prompt:
             ivr_node['playPrompt'] = [audio_prompt]
         
-        # Connect to next node if single outgoing edge
         out_edges = [e for e in edges if e.from_id == node.id]
         if len(out_edges) == 1:
             ivr_node['goto'] = self._format_label(out_edges[0].to_id)
 
     def _select_audio_prompt(self, text: str) -> Optional[str]:
         text_lower = text.lower()
-        
         for key, prompt in AudioPrompts.PROMPTS.items():
             if isinstance(key, str) and key in text_lower:
                 return prompt
-        
         return AudioPrompts.PROMPTS['default']
 
     @staticmethod
     def _format_label(label: str) -> str:
-        """Convert node ID to a more readable label"""
         return ' '.join(word.capitalize() for word in label.replace('_', ' ').split())
 
 def graph_to_ivr(graph: Dict) -> List[Dict[str, Any]]:
