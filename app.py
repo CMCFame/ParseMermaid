@@ -16,11 +16,7 @@ from openai_ivr_converter import convert_mermaid_to_ivr
 from openai_converter import process_flow_diagram
 
 # Page configuration
-st.set_page_config(
-    page_title="Mermaid-to-IVR Converter",
-    page_icon="🔄",
-    layout="wide"
-)
+st.set_page_config(page_title="Mermaid-to-IVR Converter", page_icon="🔄", layout="wide")
 
 # Constants and examples
 DEFAULT_FLOWS = {
@@ -31,13 +27,11 @@ DEFAULT_FLOWS = {
     A -->|"3 - need more time"| C
     A -->|"retry logic"| A
     B -->|"yes"| E["Enter Employee PIN"]''',
-    
     "PIN Change": '''flowchart TD
     A["Enter PIN"] --> B{"Valid PIN?"}
     B -->|"No"| C["Invalid Entry"]
     B -->|"Yes"| D["PIN Changed"]
     C --> A''',
-    
     "Transfer Flow": '''flowchart TD
     A["Transfer Request"] --> B{"Transfer Available?"}
     B -->|"Yes"| C["Connect"]
@@ -98,35 +92,24 @@ def render_mermaid_safely(mermaid_text: str):
 
 def main():
     st.title("🔄 Mermaid-to-IVR Converter")
-    st.markdown("""
-    This tool converts flow diagrams into IVR configurations.
-    Supports multiple input methods and formats.
-    """)
+    st.markdown("""This tool converts flow diagrams into IVR configurations.""")
 
     # Initialize session state
     if 'last_mermaid_code' not in st.session_state:
         st.session_state.last_mermaid_code = None
     if 'last_ivr_code' not in st.session_state:
         st.session_state.last_ivr_code = None
+    if 'current_mermaid_code' not in st.session_state:
+        st.session_state.current_mermaid_code = None
 
     # Sidebar configuration
     with st.sidebar:
         st.header("⚙️ Configuration")
-        
-        conversion_method = st.radio(
-            "Input Method",
-            ["Mermaid Editor", "Image Upload"]
-        )
-        
-        export_format = st.radio(
-            "Export Format",
-            ["JavaScript", "JSON", "YAML"]
-        )
-        
+        conversion_method = st.radio("Input Method", ["Mermaid Editor", "Image Upload"])
+        export_format = st.radio("Export Format", ["JavaScript", "JSON", "YAML"])
         st.subheader("Advanced Settings")
         validate_syntax = st.checkbox("Validate Diagram", value=True)
         show_debug = st.checkbox("Show Debug Info", value=False)
-
         st.subheader("API Configuration")
         openai_api_key = st.text_input(
             "OpenAI API Key",
@@ -153,15 +136,14 @@ def main():
                 st.session_state.last_mermaid_code or "",
                 height=400
             )
+        
+        if mermaid_text:
+            st.session_state.current_mermaid_code = mermaid_text
 
     else:  # Image Upload
         col1, col2 = st.columns(2)
-        
         with col1:
-            uploaded_file = st.file_uploader(
-                "Upload Flowchart",
-                type=['pdf', 'png', 'jpg', 'jpeg']
-            )
+            uploaded_file = st.file_uploader("Upload Flowchart", type=['pdf', 'png', 'jpg', 'jpeg'])
         
         with col2:
             if uploaded_file:
@@ -172,7 +154,6 @@ def main():
                     st.error(f"Error loading image: {str(e)}")
         
         # Convert image to Mermaid
-        mermaid_text = ""
         if uploaded_file and openai_api_key:
             if st.button("🔄 Convert Image to Mermaid"):
                 with st.spinner("Converting image..."):
@@ -180,11 +161,16 @@ def main():
                         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
                             tmp_file.write(uploaded_file.getvalue())
                             mermaid_text = process_flow_diagram(tmp_file.name, openai_api_key)
+                            st.session_state.current_mermaid_code = mermaid_text
                             st.session_state.last_mermaid_code = mermaid_text
                         
                         st.success("Image converted successfully!")
                         st.subheader("Generated Mermaid Code")
                         st.code(mermaid_text, language="mermaid")
+                        
+                        # Preview
+                        st.subheader("Preview")
+                        render_mermaid_safely(mermaid_text)
                         
                     except Exception as e:
                         st.error(f"Conversion Error: {str(e)}")
@@ -194,37 +180,35 @@ def main():
                         if 'tmp_file' in locals():
                             os.unlink(tmp_file.name)
 
-    # Preview area
-    if mermaid_text:
+    # Preview area for Mermaid Editor
+    if conversion_method == "Mermaid Editor" and st.session_state.current_mermaid_code:
         st.subheader("👁️ Preview")
-        render_mermaid_safely(mermaid_text)
+        render_mermaid_safely(st.session_state.current_mermaid_code)
 
-    # Convert button
+    # Convert to IVR button
     if st.button("🔄 Convert to IVR"):
-        if not mermaid_text:
+        mermaid_code = st.session_state.current_mermaid_code
+        if not mermaid_code:
             st.error("Please provide Mermaid code to convert")
             return
             
         with st.spinner("Converting to IVR..."):
             try:
                 if validate_syntax:
-                    error = validate_mermaid(mermaid_text)
+                    error = validate_mermaid(mermaid_code)
                     if error:
                         st.error(error)
                         return
 
-                # Store the current Mermaid code in session state
-                st.session_state.last_mermaid_code = mermaid_text
-                
                 # Convert using custom converter
-                ivr_code = convert_mermaid_to_ivr(mermaid_text)
+                ivr_code = convert_mermaid_to_ivr(mermaid_code)
                 st.session_state.last_ivr_code = ivr_code
                 output = format_ivr_code(ivr_code, export_format.lower())
 
                 # Show result and differences
                 st.subheader("📤 Generated IVR Configuration")
                 st.code(output, language=export_format.lower())
-                show_code_diff(mermaid_text, output)
+                show_code_diff(mermaid_code, output)
 
                 # Download option
                 tmp_file = save_temp_file(output)

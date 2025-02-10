@@ -3,7 +3,7 @@ Enhanced Mermaid parser with IVR-specific functionality
 """
 import re
 from enum import Enum, auto
-from typing import Dict, List, Optional, Union, Set
+from typing import Dict, List, Optional, Union, Set, Tuple
 from dataclasses import dataclass, field
 
 class NodeType(Enum):
@@ -15,10 +15,10 @@ class NodeType(Enum):
     INPUT = auto()
     TRANSFER = auto()
     SUBPROCESS = auto()
-    MENU = auto()        # New: For menu options
-    PROMPT = auto()      # New: For voice prompts
-    ERROR = auto()       # New: For error handling
-    RETRY = auto()       # New: For retry logic
+    MENU = auto()
+    PROMPT = auto()
+    ERROR = auto()
+    RETRY = auto()
 
 @dataclass
 class Node:
@@ -41,202 +41,142 @@ class Edge:
     to_id: str
     label: Optional[str] = None
     style: Optional[str] = None
-    condition: Optional[str] = None  # New: For conditional flows
+    condition: Optional[str] = None
 
 class MermaidParser:
     """Enhanced Mermaid parser with IVR focus"""
     
     def __init__(self):
+        self.nodes = {}
+        self.edges = []
+        self.subgraphs = {}
+        self._setup_patterns()
+
+    def _setup_patterns(self):
+        """Initialize regex patterns for parsing"""
         self.node_patterns = {
-            NodeType.START: [
-                r'\bstart\b', r'\bbegin\b', r'\bentry\b', 
-                r'\binitial\b', r'\bstart call\b'
-            ],
-            NodeType.END: [
-                r'\bend\b', r'\bstop\b', r'\bdone\b', 
-                r'\bterminate\b', r'\bend call\b', r'\bhangup\b'
-            ],
-            NodeType.DECISION: [
-                r'\?', r'\{.*\}', r'\bchoice\b', r'\bif\b',
-                r'\bpress\b', r'\bselect\b', r'\boption\b'
-            ],
-            NodeType.INPUT: [
-                r'\binput\b', r'\benter\b', r'\bprompt\b', 
-                r'\bget\b', r'\bdigits\b', r'\bpin\b'
-            ],
-            NodeType.TRANSFER: [
-                r'\btransfer\b', r'\broute\b', r'\bdispatch\b',
-                r'\bforward\b', r'\bconnect\b'
-            ],
-            NodeType.MENU: [
-                r'\bmenu\b', r'\boptions\b', r'\bselect\b',
-                r'\bchoices\b'
-            ],
-            NodeType.PROMPT: [
-                r'\bplay\b', r'\bspeak\b', r'\bannounce\b',
-                r'\bmessage\b'
-            ],
-            NodeType.ERROR: [
-                r'\berror\b', r'\bfail\b', r'\binvalid\b',
-                r'\bretry\b', r'\btimeout\b'
-            ]
+            # Node type identification patterns
+            'start': r'\b(start|begin|entry|initial)\b',
+            'end': r'\b(end|stop|done|terminate|hangup)\b',
+            'decision': r'(\?|choice|if|press|select|option)',
+            'input': r'\b(input|enter|prompt|get|digits|pin)\b',
+            'transfer': r'\b(transfer|route|dispatch|forward|connect)\b',
+            'menu': r'\b(menu|options|select|choices)\b',
+            'prompt': r'\b(play|speak|announce|message)\b',
+            'error': r'\b(error|fail|invalid|retry|timeout)\b'
         }
 
-        self.edge_patterns = {
-            # Standard connection
-            r'-->': '',
-            # Labeled connection with possible DTMF
-            r'--\|(.*?)\|->': 'label',
-            # Dotted connection for optional flows
-            r'-\.->\s*': 'optional',
-            # Thick connection for primary paths
-            r'==+>': 'primary'
+        # Node syntax patterns
+        self.syntax_patterns = {
+            'node': r'^(\w+)\s*(\[|\{|\()(.*?)(\]|\}|\))',
+            'edge': r'(\w+)\s*(-+->)\s*(\w+)',
+            'edge_label': r'\|\s*(.*?)\s*\|',
+            'subgraph': r'subgraph\s+(\w+)(?:\s*\[(.*?)\])?',
+            'style': r'style\s+(\w+)\s+(.*?)$',
+            'class_def': r'classDef\s+(\w+)\s+(.*?)$'
         }
 
     def parse(self, mermaid_text: str) -> Dict:
-        """
-        Parse Mermaid diagram text into structured format
-        
-        Args:
-            mermaid_text: Raw Mermaid diagram text
-            
-        Returns:
-            Dict containing parsed nodes, edges, and metadata
-        """
-        lines = [line.strip() for line in mermaid_text.split('\n') if line.strip()]
-        
-        nodes = {}
-        edges = []
-        subgraphs = {}
-        metadata = {
-            'title': None,
-            'direction': 'TD',
-            'styles': {}
-        }
-        
+        """Parse Mermaid diagram text into structured format"""
+        self.nodes = {}
+        self.edges = []
+        self.subgraphs = {}
         current_subgraph = None
+        
+        lines = [line.strip() for line in mermaid_text.split('\n') if line.strip()]
         
         try:
             for line in lines:
-                # Skip comments and directives
-                if line.startswith('%%') or line.startswith('%'):
+                if line.startswith(('%%', 'flowchart', 'graph')):
                     continue
-                
-                # Parse flowchart direction
-                if line.startswith('flowchart') or line.startswith('graph'):
-                    direction_match = re.match(r'(?:flowchart|graph)\s+(\w+)', line)
-                    if direction_match:
-                        metadata['direction'] = direction_match.group(1)
-                    continue
-                
-                # Handle subgraphs
+
                 if line.startswith('subgraph'):
-                    subgraph_match = re.match(r'subgraph\s+(\w+)(?:\s*\[(.*?)\])?', line)
-                    if subgraph_match:
-                        current_subgraph = subgraph_match.group(1)
-                        title = subgraph_match.group(2) or current_subgraph
-                        subgraphs[current_subgraph] = {
-                            'id': current_subgraph,
-                            'title': title,
-                            'nodes': set()
-                        }
-                    continue
-                
-                if line == 'end':
+                    current_subgraph = self._parse_subgraph(line)
+                elif line == 'end':
                     current_subgraph = None
-                    continue
-                
-                # Parse nodes
-                node_match = self._parse_node(line)
-                if node_match:
-                    node_id, node = node_match
-                    nodes[node_id] = node
-                    if current_subgraph:
-                        subgraphs[current_subgraph]['nodes'].add(node_id)
-                    continue
-                
-                # Parse edges
-                edge = self._parse_edge(line)
-                if edge:
-                    edges.append(edge)
-                    continue
-                
-                # Parse styles
-                style_match = self._parse_style(line)
-                if style_match:
-                    class_name, styles = style_match
-                    metadata['styles'][class_name] = styles
-            
-            return {
-                'nodes': nodes,
-                'edges': edges,
-                'subgraphs': subgraphs,
-                'metadata': metadata
-            }
+                elif '-->' in line:
+                    edge = self._parse_edge(line)
+                    if edge:
+                        self.edges.append(edge)
+                elif any(c in line for c in '[]{}()'):
+                    node = self._parse_node(line)
+                    if node:
+                        self.nodes[node.id] = node
+                        if current_subgraph:
+                            node.subgraph = current_subgraph
+
+            return self._build_output()
             
         except Exception as e:
             raise ValueError(f"Failed to parse Mermaid diagram: {str(e)}")
 
-    def _parse_node(self, line: str) -> Optional[tuple]:
-        """Parse node definition"""
-        # Match node patterns with various syntax forms
-        node_patterns = [
-            # ["text"] form
-            r'^\s*(\w+)\s*\["([^"]+)"\]',
-            # {"text"} form for decisions
-            r'^\s*(\w+)\s*\{"([^"]+)"\}',
-            # ("text") form
-            r'^\s*(\w+)\s*\("([^"]+)"\)',
-            # [("text")] form
-            r'^\s*(\w+)\s*\[\("([^"]+)"\)\]'
-        ]
+    def _parse_node(self, line: str) -> Optional[Node]:
+        """Parse node definition with enhanced handling"""
+        match = re.match(self.syntax_patterns['node'], line)
+        if not match:
+            return None
+
+        node_id, open_bracket, content, close_bracket = match.groups()
+        content = content.strip('"\'')
         
-        for pattern in node_patterns:
-            match = re.match(pattern, line)
-            if match:
-                node_id, text = match.groups()
-                node_type = self._determine_node_type(text)
-                return node_id, Node(
-                    id=node_id,
-                    raw_text=text,
-                    node_type=node_type
-                )
-        return None
+        # Determine node type
+        node_type = NodeType.DECISION if open_bracket == '{' else NodeType.ACTION
+        for type_name, pattern in self.node_patterns.items():
+            if re.search(pattern, content.lower()):
+                node_type = getattr(NodeType, type_name.upper())
+                break
+
+        return Node(
+            id=node_id,
+            raw_text=content,
+            node_type=node_type
+        )
 
     def _parse_edge(self, line: str) -> Optional[Edge]:
-        """Parse edge definition"""
-        for pattern, style in self.edge_patterns.items():
-            match = re.search(f'(\w+)\s*{pattern}\s*(\w+)', line)
-            if match:
-                from_id, to_id = match.groups()
-                label = None
-                if 'label' in style and len(match.groups()) > 2:
-                    label = match.group(2)
-                return Edge(
-                    from_id=from_id,
-                    to_id=to_id,
-                    label=label,
-                    style=style
-                )
+        """Parse edge definition with improved label handling"""
+        edge_match = re.match(self.syntax_patterns['edge'], line)
+        if not edge_match:
+            return None
+
+        from_id, arrow_type, to_id = edge_match.groups()
+        label = None
+
+        # Extract label if present
+        label_match = re.search(self.syntax_patterns['edge_label'], line)
+        if label_match:
+            label = label_match.group(1).strip('"\'')
+
+        return Edge(
+            from_id=from_id,
+            to_id=to_id,
+            label=label,
+            style=arrow_type
+        )
+
+    def _parse_subgraph(self, line: str) -> Optional[str]:
+        """Parse subgraph definition"""
+        match = re.match(self.syntax_patterns['subgraph'], line)
+        if match:
+            subgraph_id, title = match.groups()
+            self.subgraphs[subgraph_id] = {
+                'id': subgraph_id,
+                'title': title or subgraph_id,
+                'nodes': set()
+            }
+            return subgraph_id
         return None
 
-    def _parse_style(self, line: str) -> Optional[tuple]:
-        """Parse style definition"""
-        style_match = re.match(r'classDef\s+(\w+)\s+(.*?)$', line)
-        if style_match:
-            class_name, styles = style_match.groups()
-            return class_name, styles
-        return None
-
-    def _determine_node_type(self, text: str) -> NodeType:
-        """Determine node type from text content"""
-        text_lower = text.lower()
-        
-        for node_type, patterns in self.node_patterns.items():
-            if any(re.search(pattern, text_lower) for pattern in patterns):
-                return node_type
-        
-        return NodeType.ACTION
+    def _build_output(self) -> Dict:
+        """Build final output structure"""
+        return {
+            'nodes': self.nodes,
+            'edges': self.edges,
+            'subgraphs': self.subgraphs,
+            'metadata': {
+                'direction': 'TD',
+                'styles': {}
+            }
+        }
 
 def parse_mermaid(mermaid_text: str) -> Dict:
     """Convenience wrapper for parsing Mermaid diagrams"""
