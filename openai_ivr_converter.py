@@ -19,26 +19,34 @@ class MermaidIVRConverter:
 
     def convert_to_ivr(self, mermaid_code: str) -> str:
         try:
-            ivrFlow = self.parseMermaidFlow(mermaid_code)
+            # Clean the mermaid code first
+            cleaned_code = self._clean_mermaid_code(mermaid_code)
+            ivrFlow = self.parseMermaidFlow(cleaned_code)
             nodes_str = self._format_nodes(ivrFlow)
             return f"module.exports = [\n{nodes_str}\n];"
         except Exception as e:
             logging.error(f"Custom conversion failed: {str(e)}")
-            return '''module.exports = [{
-                "label": "Problems",
-                "playPrompt": "callflow:1351",
-                "goto": "hangup"
-            }];'''
+            return 'module.exports = [{ "label": "Problems", "playPrompt": "callflow:1351", "goto": "hangup" }];'
+
+    def _clean_mermaid_code(self, code: str) -> str:
+        """Clean and normalize mermaid code"""
+        # Split into lines and clean each line
+        lines = []
+        for line in code.split('\n'):
+            line = line.strip()
+            if line and not line.startswith(('%%', 'flowchart', 'style', 'classDef')):
+                # Remove color and style information
+                if not any(style in line.lower() for style in ['fill:', 'stroke:', 'stroke-width:']):
+                    lines.append(line)
+        return '\n'.join(lines)
 
     def parseMermaidFlow(self, mermaid_code: str) -> List[Dict[str, Any]]:
         self.nodeMap = {}
         lines = mermaid_code.split('\n')
         
-        # Clean and normalize the code
-        lines = [line.strip() for line in lines if line.strip()]
-        
         for line in lines:
-            if line.startswith(('%%', 'flowchart', 'style', 'classDef')):
+            line = line.strip()
+            if not line or line.startswith(('%%', 'flowchart', 'style', 'classDef')):
                 continue
 
             if '-->' in line:
@@ -49,16 +57,23 @@ class MermaidIVRConverter:
         return self._generateIVRFlow()
 
     def _parseNode(self, line: str) -> None:
-        # Updated regex to handle both quoted and unquoted content
-        node_match = re.match(r'^([A-Za-z0-9_]+)\s*[\[\{\(](["\']?)([^"\'\]\}\)]+)(["\']?)[\]\}\)]', line)
+        """Parse node with enhanced content handling"""
+        # Match node ID and content
+        node_match = re.match(r'([A-Za-z0-9_]+)\s*[\[\{\(](["\']?)(.*?)(["\'\]\}\)])', line)
         if not node_match:
             return
 
-        node_id, quote_start, content, quote_end = node_match.groups()
+        node_id = node_match.group(1)
+        content = node_match.group(3)
         node_type = 'decision' if '{' in line else 'process'
-        
-        # Clean content and handle HTML-style breaks
-        content = content.replace('<br/>', '\n').replace('<br>', '\n')
+
+        # Clean up the content
+        content = (content
+                  .replace('"', '')
+                  .replace("'", "")
+                  .replace('<br/>', '\n')
+                  .replace('<br>', '\n'))
+
         self.nodeMap[node_id] = {
             'id': node_id,
             'type': node_type,
@@ -67,21 +82,31 @@ class MermaidIVRConverter:
         }
 
     def _parseConnection(self, line: str) -> None:
-        # Handle connection labels with or without quotes
-        conn_match = re.match(r'^([A-Za-z0-9_]+)\s*-->\s*(?:\|([^|]*)\|)?\s*([A-Za-z0-9_]+)', line)
-        if not conn_match:
-            return
-
-        source, label, target = conn_match.groups()
-        if source in self.nodeMap:
-            self.nodeMap[source]['connections'].append({
-                'target': target,
-                'label': label.strip('"\'') if label else None
-            })
+        """Parse connection with label handling"""
+        # Handle connection with or without labels
+        if '|' in line:
+            # Connection with label
+            match = re.match(r'([A-Za-z0-9_]+)\s*-->\|([^|]*)\|\s*([A-Za-z0-9_]+)', line)
+            if match:
+                source, label, target = match.groups()
+                if source in self.nodeMap:
+                    self.nodeMap[source]['connections'].append({
+                        'target': target,
+                        'label': label.strip('"\'')
+                    })
+        else:
+            # Simple connection
+            match = re.match(r'([A-Za-z0-9_]+)\s*-->\s*([A-Za-z0-9_]+)', line)
+            if match:
+                source, target = match.groups()
+                if source in self.nodeMap:
+                    self.nodeMap[source]['connections'].append({
+                        'target': target,
+                        'label': None
+                    })
 
     def _generateIVRFlow(self) -> List[Dict[str, Any]]:
         ivr_flow = []
-        
         for node_id, node in self.nodeMap.items():
             ivr_node = {
                 'label': node_id,
