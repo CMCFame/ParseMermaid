@@ -1,179 +1,145 @@
 """
-Simplified Mermaid to IVR converter
+Direct IVR conversion using OpenAI with specific IVR format handling
 """
-import re
 from typing import Dict, List, Any
+from openai import OpenAI
+import json
 import logging
 
-class MermaidIVRConverter:
-    def __init__(self):
-        self.nodes = {}
-        self.connections = []
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+class OpenAIIVRConverter:
+    def __init__(self, api_key: str):
+        self.client = OpenAI(api_key=api_key)
 
     def convert_to_ivr(self, mermaid_code: str) -> str:
-        """Convert Mermaid flowchart to IVR configuration"""
+        """Convert Mermaid diagram to IVR configuration using GPT-4"""
+        
+        prompt = f"""You are an expert IVR system developer. Convert this Mermaid flowchart into a complete IVR JavaScript configuration following these exact requirements:
+
+        The IVR system requires specific configuration format:
+
+        1. Node Structure:
+           - Each node must have a unique "label" (node identifier)
+           - "log" property for documentation/logging
+           - "playPrompt" array with callflow IDs
+           - Optional properties based on node type:
+             * getDigits: For input collection
+             * branch: For conditional navigation
+             * goto: For direct transitions
+             * maxLoop: For retry limits
+             * gosub: For subroutine calls
+             * nobarge: For non-interruptible messages
+
+        2. Audio Prompts:
+           Use exact callflow IDs:
+           - 1001: Welcome/initial message
+           - 1008: PIN entry request
+           - 1009: Invalid input/retry
+           - 1010: Timeout message
+           - 1167: Accept response
+           - 1021: Decline response
+           - 1266: Qualified no response
+           - 1274: Electric callout info
+           - 1019: Callout reason
+           - 1232: Location information
+           - 1265: Wait message
+           - 1017: Not home message
+           - 1316: Availability check
+           - 1029: Goodbye message
+           - 1351: Error message
+
+        3. Input Handling:
+           For getDigits nodes:
+           {{
+             "numDigits": <number>,
+             "maxTries": <number>,
+             "validChoices": "1|2|3",
+             "errorPrompt": "callflow:1009",
+             "timeoutPrompt": "callflow:1010"
+           }}
+
+        4. Call Flow Control:
+           - Use "branch" for conditional paths
+           - Use "goto" for direct transitions
+           - Use "gosub" for subroutines like SaveCallResult
+           - Include retry logic with maxLoop
+           - Handle timeouts and errors
+
+        5. Standard Response Codes:
+           SaveCallResult parameters:
+           - Accept: [1001, "Accept"]
+           - Decline: [1002, "Decline"]
+           - Not Home: [1006, "NotHome"]
+           - Qualified No: [1145, "QualNo"]
+           - Error: [1198, "Error Out"]
+
+        Here's the Mermaid diagram to convert:
+
+        {mermaid_code}
+
+        Generate a complete IVR configuration that exactly matches this flow pattern.
+        Return only the JavaScript code in the format:
+        module.exports = [ ... ];"""
+
         try:
-            # Reset state
-            self.nodes = {}
-            self.connections = []
-            
-            # Process the code
-            self._parse_mermaid(mermaid_code)
-            
-            # Generate IVR nodes
-            ivr_nodes = self._generate_ivr_nodes()
-            
-            # Format the output
-            nodes_str = self._format_nodes(ivr_nodes)
-            return f"module.exports = [\n{nodes_str}\n];"
-            
-        except Exception as e:
-            logging.error(f"Conversion failed: {str(e)}")
-            return 'module.exports = [{ "label": "Problems", "playPrompt": "callflow:1351", "goto": "hangup" }];'
-
-    def _parse_mermaid(self, code: str) -> None:
-        """Parse Mermaid code into nodes and connections"""
-        lines = [line.strip() for line in code.split('\n') if line.strip()]
-        
-        for line in lines:
-            # Skip non-essential lines
-            if line.startswith(('flowchart', 'graph', '%%', 'style', 'classDef')):
-                continue
-                
-            # Parse connections and nodes
-            if '-->' in line:
-                self._parse_connection(line)
-            elif '[' in line or '{' in line:
-                self._parse_node(line)
-
-    def _parse_node(self, line: str) -> None:
-        """Parse a node definition line"""
-        # Extract node ID and content
-        if '[' in line:
-            parts = line.split('[', 1)
-            closing = ']'
-            node_type = 'process'
-        elif '{' in line:
-            parts = line.split('{', 1)
-            closing = '}'
-            node_type = 'decision'
-        else:
-            return
-
-        if len(parts) != 2:
-            return
-
-        node_id = parts[0].strip()
-        content = parts[1].split(closing)[0].strip(' "\'')
-
-        self.nodes[node_id] = {
-            'type': node_type,
-            'content': content.replace('<br/>', '\n').replace('<br>', '\n'),
-            'connections': []
-        }
-
-    def _parse_connection(self, line: str) -> None:
-        """Parse a connection line"""
-        # Split on arrow
-        parts = line.split('-->')
-        if len(parts) != 2:
-            return
-
-        source = parts[0].strip()
-        target = parts[1].strip()
-        label = None
-
-        # Handle connection labels
-        if '|' in target:
-            label_parts = target.split('|')
-            if len(label_parts) == 2:
-                label = label_parts[0].strip(' "\'')
-                target = label_parts[1].strip()
-
-        # Clean up node IDs
-        source = source.split('[')[0].strip()
-        target = target.split('[')[0].strip()
-
-        if source in self.nodes:
-            self.nodes[source]['connections'].append({
-                'target': target,
-                'label': label
-            })
-
-    def _generate_ivr_nodes(self) -> List[Dict[str, Any]]:
-        """Generate IVR node configurations"""
-        ivr_nodes = []
-
-        for node_id, node in self.nodes.items():
-            ivr_node = {
-                'label': node_id,
-                'log': node['content']
-            }
-
-            if node['type'] == 'decision':
-                # Decision node with multiple paths
-                ivr_node.update({
-                    'playPrompt': f"callflow:{node_id}",
-                    'getDigits': {
-                        'numDigits': 1,
-                        'maxTries': 3,
-                        'maxTime': 7,
-                        'validChoices': '|'.join(str(i+1) for i in range(len(node['connections']))),
-                        'errorPrompt': 'callflow:1009',
-                        'nonePrompt': 'callflow:1009'
+            response = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert IVR system developer specialized in creating precise IVR configurations with specific callflow IDs and control structures."
                     },
-                    'branch': {
-                        **{str(i+1): conn['target'] for i, conn in enumerate(node['connections'])},
-                        'error': 'Problems',
-                        'none': 'Problems'
+                    {
+                        "role": "user",
+                        "content": prompt
                     }
-                })
-            else:
-                # Regular node with single path
-                ivr_node['playPrompt'] = f"callflow:{node_id}"
-                if node['connections']:
-                    ivr_node['goto'] = node['connections'][0]['target']
+                ],
+                temperature=0.1,  # Low temperature for consistent output
+                max_tokens=4000
+            )
 
-            ivr_nodes.append(ivr_node)
-
-        # Add error handler
-        if ivr_nodes:
-            ivr_nodes.append({
-                'label': 'Problems',
-                'playPrompt': 'callflow:1351',
-                'goto': 'hangup'
-            })
-
-        return ivr_nodes
-
-    def _format_nodes(self, nodes: List[Dict[str, Any]]) -> str:
-        """Format nodes as JavaScript code"""
-        lines = []
-        indent = "    "
-        
-        for node in nodes:
-            node_lines = [f"{indent}{{"]
+            # Extract and clean the response
+            ivr_code = response.choices[0].message.content.strip()
             
-            for key, value in node.items():
-                if isinstance(value, str):
-                    node_lines.append(f'{indent}    "{key}": "{value}",')
-                else:
-                    node_lines.append(f'{indent}    "{key}": {value},')
-            
-            # Remove trailing comma from last property
-            if node_lines[-1].endswith(","):
-                node_lines[-1] = node_lines[-1][:-1]
-            
-            node_lines.append(f"{indent}}},")
-            lines.append("\n".join(node_lines))
-        
-        # Remove trailing comma from last node
-        if lines:
-            lines[-1] = lines[-1][:-1]
-        
-        return "\n".join(lines)
+            # Extract just the JavaScript code
+            if "module.exports = [" in ivr_code:
+                start_idx = ivr_code.find("module.exports = [")
+                end_idx = ivr_code.rfind("];") + 2
+                ivr_code = ivr_code[start_idx:end_idx]
 
-def convert_mermaid_to_ivr(mermaid_code: str, api_key: str = None) -> str:
-    """Convenience wrapper for Mermaid to IVR conversion"""
-    converter = MermaidIVRConverter()
+            # Validate basic structure
+            if not (ivr_code.startswith("module.exports = [") and ivr_code.endswith("];")):
+                raise ValueError("Invalid IVR code format generated")
+
+            # Basic validation of node structure
+            try:
+                nodes = json.loads(ivr_code[16:-1])  # Remove module.exports = and ;
+                if not isinstance(nodes, list):
+                    raise ValueError("Generated code is not a valid node array")
+                for node in nodes:
+                    if not isinstance(node, dict) or 'label' not in node:
+                        raise ValueError("Invalid node structure")
+            except json.JSONDecodeError:
+                raise ValueError("Generated code is not valid JSON")
+
+            return ivr_code
+
+        except Exception as e:
+            logger.error(f"IVR conversion failed: {str(e)}")
+            # Return a basic error handler node
+            return '''module.exports = [
+  {
+    "label": "Problems",
+    "log": "Error handler",
+    "playPrompt": ["callflow:1351"],
+    "goto": "Goodbye"
+  }
+];'''
+
+def convert_mermaid_to_ivr(mermaid_code: str, api_key: str) -> str:
+    """Wrapper function for Mermaid to IVR conversion"""
+    converter = OpenAIIVRConverter(api_key)
     return converter.convert_to_ivr(mermaid_code)
