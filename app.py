@@ -211,30 +211,33 @@ def main():
 
     # Convert button
     if st.button("🔄 Convert to IVR"):
-        if not openai_api_key:
-            st.error("Please provide an OpenAI API key in the sidebar.")
+        if conversion_method == "Image Upload" and not openai_api_key:
+            st.error("Please provide an OpenAI API key for image conversion.")
             return
 
         with st.spinner("Converting to IVR..."):
             try:
-                # Validate diagram if requested
                 if validate_syntax:
                     error = validate_mermaid(mermaid_text)
                     if error:
                         st.error(error)
                         return
 
-                # Convert to IVR using OpenAI
-                ivr_code = convert_mermaid_to_ivr(mermaid_text, openai_api_key)
+                # Try custom converter first, fallback to OpenAI
+                try:
+                    ivr_code = convert_mermaid_to_ivr(mermaid_text)
+                except Exception as e:
+                    if openai_api_key:
+                        ivr_code = convert_mermaid_to_ivr(mermaid_text, openai_api_key)
+                    else:
+                        raise e
+
                 st.session_state.last_ivr_code = ivr_code
-                
-                # Format output
                 output = format_ivr_code(ivr_code, export_format.lower())
 
-                # Show result
                 st.subheader("📤 Generated IVR Configuration")
                 st.code(output, language=export_format.lower())
-                
+
                 # Debug information
                 if show_debug:
                     with st.expander("Debug Information"):
