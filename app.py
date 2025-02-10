@@ -12,7 +12,7 @@ from PIL import Image
 import traceback
 
 from parse_mermaid import parse_mermaid, MermaidParser
-from openai_ivr_converter import convert_mermaid_to_ivr
+from mermaid_ivr_converter import convert_mermaid_to_ivr  # Updated import
 from openai_converter import process_flow_diagram
 
 # Page configuration
@@ -133,12 +133,12 @@ def main():
         validate_syntax = st.checkbox("Validate Diagram", value=True)
         show_debug = st.checkbox("Show Debug Info", value=False)
 
-        # API Configuration
+        # API Configuration for image/PDF processing (still required)
         st.subheader("API Configuration")
         openai_api_key = st.text_input(
             "OpenAI API Key",
             type="password",
-            help="Required for image processing and IVR conversion"
+            help="Required for image processing and Mermaid conversion"
         )
 
     # Main content area
@@ -209,12 +209,8 @@ def main():
         st.subheader("👁️ Preview")
         render_mermaid_safely(mermaid_text)
 
-    # Convert button
+    # Convert button for IVR configuration
     if st.button("🔄 Convert to IVR"):
-        if not openai_api_key:
-            st.error("Please provide an OpenAI API key in the sidebar.")
-            return
-
         with st.spinner("Converting to IVR..."):
             try:
                 # Validate diagram if requested
@@ -224,8 +220,8 @@ def main():
                         st.error(error)
                         return
 
-                # Convert to IVR using OpenAI
-                ivr_code = convert_mermaid_to_ivr(mermaid_text, openai_api_key)
+                # Use the local converter; no API key is needed here
+                ivr_code = convert_mermaid_to_ivr(mermaid_text)
                 st.session_state.last_ivr_code = ivr_code
                 
                 # Format output
