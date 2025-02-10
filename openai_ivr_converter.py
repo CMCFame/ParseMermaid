@@ -36,16 +36,10 @@ class MermaidIVRConverter:
 
         # Split into lines and process each line
         lines = mermaid_code.split('\n')
-        current_subgraph = None
-
         for line in lines:
             line = line.strip()
             # Skip empty lines, comments, and flowchart declaration
-            if not line or line.startswith('%%') or line.startswith('flowchart'):
-                continue
-
-            # Skip subgraph handling for now
-            if line.startswith('subgraph') or line == 'end' or 'direction' in line:
+            if not line or line.startswith('%%') or line.startswith('flowchart') or 'classDef' in line:
                 continue
 
             if '-->' in line:
@@ -56,60 +50,64 @@ class MermaidIVRConverter:
         return self._generateIVRFlow()
 
     def _parseNode(self, line: str) -> None:
-        """Parse node definition with enhanced handling"""
-        # Skip subgraph lines
-        if line.startswith('subgraph') or line == 'end':
+        """Parse node definition with enhanced syntax handling"""
+        if 'classDef' in line or line.startswith('subgraph') or line == 'end':
             return
 
-        node_match = None
-        node_type = 'process'
-        
-        if '[' in line and ']' in line:
-            node_id = line[:line.find('[')].strip()
-            content = line[line.find('[')+1:line.find(']')]
-            node_type = 'process'
-        elif '{' in line and '}' in line:
-            node_id = line[:line.find('{')].strip()
-            content = line[line.find('{')+1:line.find('}')]
-            node_type = 'decision'
-        elif '(' in line and ')' in line:
-            node_id = line[:line.find('(')].strip()
-            content = line[line.find('(')+1:line.find(')')]
-            node_type = 'rounded'
-        else:
-            return
-
-        # Clean the content
-        content = content.strip('"').strip()
-        
-        if node_id:
-            self.nodeMap[node_id] = {
-                'id': node_id,
-                'type': node_type,
-                'label': content.replace('<br/>', '\n').replace('<br>', '\n'),
-                'connections': []
-            }
+        # Extract node ID and content
+        for char in ['[', '{', '(']:
+            if char in line:
+                parts = line.split(char, 1)
+                if len(parts) == 2:
+                    node_id = parts[0].strip()
+                    content = parts[1]
+                    
+                    # Find matching closing bracket
+                    closing_map = {'[': ']', '{': '}', '(': ')'}
+                    closing = closing_map[char]
+                    if closing in content:
+                        content = content.split(closing)[0]
+                        
+                        # Determine node type
+                        node_type = 'decision' if char == '{' else 'process'
+                        
+                        # Clean content
+                        content = content.strip().strip('"')
+                        
+                        self.nodeMap[node_id] = {
+                            'id': node_id,
+                            'type': node_type,
+                            'label': content.replace('<br/>', '\n').replace('<br>', '\n'),
+                            'connections': []
+                        }
+                        return
 
     def _parseConnection(self, line: str) -> None:
-        """Parse connection with label handling"""
+        """Parse connection with enhanced label handling"""
         if '-->' not in line:
             return
 
-        parts = line.split('-->')
+        # Split on first occurrence of -->
+        parts = line.split('-->', 1)
+        if len(parts) != 2:
+            return
+
         source = parts[0].strip()
         target = parts[1].strip()
         label = None
 
+        # Handle connection labels
         if '|' in target:
-            split_target = target.split('|')
+            split_target = target.split('|', 1)
             if len(split_target) == 2:
-                label = split_target[0].strip('"').strip()
-                target = split_target[1].strip('"').strip()
+                label = split_target[0].strip('"[]').strip()
+                target = split_target[1].strip('"[]').strip()
 
-        # Clean IDs
+        # Clean node IDs of any remaining brackets
         source = source.split('[')[0].split('{')[0].split('(')[0].strip()
         target = target.split('[')[0].split('{')[0].split('(')[0].strip()
 
+        # Store connection
         if source in self.nodeMap:
             self.nodeMap[source]['connections'].append({
                 'target': target,
