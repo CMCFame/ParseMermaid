@@ -1,12 +1,11 @@
 """
-Enhanced IVR converter with both OpenAI and custom conversion capabilities
+Custom Mermaid to IVR converter implementation
 """
 from typing import Dict, List, Any
 import logging
-from openai import OpenAI
 import json
 
-class MermaidToIVRConverter:
+class MermaidIVRConverter:
     def __init__(self, config = None):
         self.config = {
             'defaultMaxTries': 3,
@@ -19,7 +18,22 @@ class MermaidToIVRConverter:
         self.connections = []
         self.ivrFlow = []
 
+    def convert_to_ivr(self, mermaid_code: str) -> str:
+        """Convert Mermaid flowchart to IVR configuration"""
+        try:
+            ivrFlow = self.parseMermaidFlow(mermaid_code)
+            nodes_str = self._format_nodes(ivrFlow)
+            return f"module.exports = [\n{nodes_str}\n];"
+        except Exception as e:
+            logging.error(f"Custom conversion failed: {str(e)}")
+            raise e
+
     def parseMermaidFlow(self, mermaid_code: str) -> List[Dict[str, Any]]:
+        # Reset state for new conversion
+        self.nodeMap = {}
+        self.connections = []
+        self.ivrFlow = []
+
         lines = mermaid_code.split('\n')
         current_subgraph = None
 
@@ -28,19 +42,14 @@ class MermaidToIVRConverter:
             if not line or line.startswith('%%') or line.startswith('flowchart'):
                 continue
 
-            if line.startswith('subgraph'):
-                current_subgraph = self._parseSubgraph(line)
-            elif line == 'end':
-                current_subgraph = None
-            elif '-->' in line:
+            if '-->' in line:
                 self._parseConnection(line)
             elif any(c in line for c in '[]{}()'):
-                self._parseNode(line, current_subgraph)
+                self._parseNode(line)
 
         return self._generateIVRFlow()
 
-    def _parseNode(self, line: str, subgraph: str = None) -> None:
-        # Handle different node types
+    def _parseNode(self, line: str) -> None:
         node_match = None
         node_type = 'process'
         
@@ -56,13 +65,16 @@ class MermaidToIVRConverter:
 
         if node_match:
             node_id = node_match[0].strip()
-            content = node_match[1].split(']')[0].split('}')[0].split(')')[0].replace('"', '')
+            content = node_match[1]
+            for end_char in [']', '}', ')']:
+                if end_char in content:
+                    content = content.split(end_char)[0]
+            content = content.replace('"', '').strip()
             
             self.nodeMap[node_id] = {
                 'id': node_id,
                 'type': node_type,
                 'label': content.replace('<br/>', '\n').replace('<br>', '\n'),
-                'subgraph': subgraph,
                 'connections': []
             }
 
@@ -99,7 +111,6 @@ class MermaidToIVRConverter:
 
             ivr_flow.append(ivr_node)
 
-        # Add standard error handlers
         ivr_flow.extend(self._createErrorHandlers())
         return ivr_flow
 
@@ -147,53 +158,36 @@ class MermaidToIVRConverter:
             }
         ]
 
-class OpenAIIVRConverter:
-    def __init__(self, api_key: str):
-        self.client = OpenAI(api_key=api_key)
-        self.custom_converter = MermaidToIVRConverter()
-
-    def convert_to_ivr(self, mermaid_code: str) -> str:
-        try:
-            return self.custom_converter.convert_to_ivr(mermaid_code)
-        except Exception as e:
-            logging.warning(f"Custom conversion failed, using OpenAI: {str(e)}")
-            return self._convert_with_openai(mermaid_code)
-
-    def _convert_with_openai(self, mermaid_code: str) -> str:
-        prompt = f"""Convert this Mermaid flowchart to IVR JavaScript configuration:
-
-{mermaid_code}
-
-Return only the JavaScript code in module.exports = [...]; format."""
-
-        try:
-            response = self.client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "You are an IVR system expert."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1
-            )
-
-            ivr_code = response.choices[0].message.content.strip()
+    def _format_nodes(self, nodes: List[Dict[str, Any]]) -> str:
+        formatted = []
+        indent = "    "
+        
+        for node in nodes:
+            node_lines = []
+            node_lines.append(f"{indent}{{")
             
-            # Validate and clean response
-            if "module.exports = [" in ivr_code:
-                start_idx = ivr_code.find("module.exports = [")
-                end_idx = ivr_code.rfind("];") + 2
-                ivr_code = ivr_code[start_idx:end_idx]
-
-            return ivr_code
-
-        except Exception as e:
-            logging.error(f"OpenAI conversion failed: {str(e)}")
-            return 'module.exports = [{ "label": "Problems", "playPrompt": "callflow:1351", "goto": "hangup" }];'
+            for key, value in node.items():
+                if isinstance(value, str):
+                    node_lines.append(f'{indent}    "{key}": "{value}",')
+                elif isinstance(value, dict):
+                    node_lines.append(f'{indent}    "{key}": {json.dumps(value, indent=8)},')
+                else:
+                    node_lines.append(f'{indent}    "{key}": {json.dumps(value)},')
+            
+            if node_lines[-1].endswith(","):
+                node_lines[-1] = node_lines[-1][:-1]
+            
+            node_lines.append(f"{indent}}},")
+            formatted.append("\n".join(node_lines))
+        
+        if formatted:
+            formatted[-1] = formatted[-1][:-1]  # Remove trailing comma
+        return "\n".join(formatted)
 
 def convert_mermaid_to_ivr(mermaid_code: str, api_key: str = None) -> str:
-    if api_key:
-        converter = OpenAIIVRConverter(api_key)
-    else:
-        converter = MermaidToIVRConverter()
-    
+    """
+    Converts Mermaid code to IVR using custom converter
+    The api_key parameter is kept for compatibility but not used
+    """
+    converter = MermaidIVRConverter()
     return converter.convert_to_ivr(mermaid_code)

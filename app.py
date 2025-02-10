@@ -138,7 +138,7 @@ def main():
         openai_api_key = st.text_input(
             "OpenAI API Key",
             type="password",
-            help="Required for image processing and IVR conversion"
+            help="Required for image processing"
         )
 
     # Main content area
@@ -223,18 +223,12 @@ def main():
                         st.error(error)
                         return
 
-                # Try custom converter first, fallback to OpenAI
-                try:
-                    ivr_code = convert_mermaid_to_ivr(mermaid_text)
-                except Exception as e:
-                    if openai_api_key:
-                        ivr_code = convert_mermaid_to_ivr(mermaid_text, openai_api_key)
-                    else:
-                        raise e
-
+                # Use custom converter directly
+                ivr_code = convert_mermaid_to_ivr(mermaid_text)
                 st.session_state.last_ivr_code = ivr_code
                 output = format_ivr_code(ivr_code, export_format.lower())
 
+                # Show result
                 st.subheader("📤 Generated IVR Configuration")
                 st.code(output, language=export_format.lower())
 
