@@ -60,8 +60,16 @@ class SessionState:
     @classmethod
     def initialize(cls):
         """Initialize all required session state variables"""
-        for key, default_value in cls.REQUIRED_KEYS.items():
-            if key not in st.session_state:
+        try:
+            for key, default_value in cls.REQUIRED_KEYS.items():
+                if key not in st.session_state:
+                    st.session_state[key] = default_value
+                elif st.session_state[key] is None:
+                    st.session_state[key] = default_value
+        except Exception as e:
+            logger.error(f"Error initializing session state: {str(e)}")
+            # Reset all state if there's an error
+            for key, default_value in cls.REQUIRED_KEYS.items():
                 st.session_state[key] = default_value
 
     @classmethod
@@ -154,7 +162,7 @@ def render_mermaid_safely(mermaid_text: str):
                     st.session_state.diagram_height = (
                         800 if st.session_state.diagram_height == 400 else 400
                     )
-                    st.experimental_rerun()
+                    st.rerun()
     except Exception as e:
         st.error(f"Preview Error: {str(e)}")
         st.code(mermaid_text, language="mermaid")
@@ -331,7 +339,7 @@ def main():
                         if mermaid_code:
                             st.session_state.mermaid_code = mermaid_code
                             st.session_state.conversion_step = 1
-                            st.experimental_rerun()
+                            st.rerun()
 
         else:  # Mermaid Editor
             st.session_state.mermaid_code = st.text_area(
@@ -364,11 +372,12 @@ def main():
                         handle_ivr_conversion(st.session_state.mermaid_code, show_debug)
                 else:
                     handle_ivr_conversion(st.session_state.mermaid_code, show_debug)
-
+                    
         # Show conversion status
         if st.session_state.conversion_status:
             show_conversion_status()
-                # Show debug information
+
+    # Show debug information
     if show_debug and st.session_state.conversion_step > 0:
         with st.expander("Debug Information"):
             st.write("Session State:", {
