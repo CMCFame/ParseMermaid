@@ -2,7 +2,6 @@
 Streamlit app for IVR flow conversion with enhanced OpenAI integration
 """
 import streamlit as st
-import streamlit_mermaid as st_mermaid
 import json
 import yaml
 from typing import Optional, Dict, Any
@@ -76,7 +75,7 @@ def show_code_diff(original: str, converted: str):
     with col1:
         st.subheader("Original Mermaid")
         if original and original.strip():
-            st.code(original, language="mermaid")
+            st.markdown(f"```mermaid\n{original}\n```")
         else:
             st.info("No original Mermaid code available")
     with col2:
@@ -84,8 +83,9 @@ def show_code_diff(original: str, converted: str):
         st.code(converted, language="javascript")
 
 def render_mermaid_safely(mermaid_text: str):
+    """Safely render Mermaid diagram with error handling"""
     try:
-        st_mermaid.st_mermaid(mermaid_text, height=400)
+        st.markdown(f"```mermaid\n{mermaid_text}\n```")
     except Exception as e:
         st.error(f"Preview Error: {str(e)}")
         st.code(mermaid_text, language="mermaid")
