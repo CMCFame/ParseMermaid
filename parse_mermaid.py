@@ -15,10 +15,10 @@ class NodeType(Enum):
     INPUT = auto()
     TRANSFER = auto()
     SUBPROCESS = auto()
-    MENU = auto()        # New: For menu options
-    PROMPT = auto()      # New: For voice prompts
-    ERROR = auto()       # New: For error handling
-    RETRY = auto()       # New: For retry logic
+    MENU = auto()  # New: For menu options
+    PROMPT = auto()  # New: For voice prompts
+    ERROR = auto()  # New: For error handling
+    RETRY = auto()  # New: For retry logic
 
 @dataclass
 class Node:
@@ -81,12 +81,11 @@ class MermaidParser:
                 r'\bretry\b', r'\btimeout\b'
             ]
         }
-
         self.edge_patterns = {
             # Standard connection
             r'-->': '',
             # Labeled connection with possible DTMF
-            r'--\|(.*?)\|->': 'label',
+            r'--\|.*?\|-->': 'label',
             # Dotted connection for optional flows
             r'-\.->\s*': 'optional',
             # Thick connection for primary paths
@@ -99,7 +98,7 @@ class MermaidParser:
         
         Args:
             mermaid_text: Raw Mermaid diagram text
-            
+        
         Returns:
             Dict containing parsed nodes, edges, and metadata
         """
@@ -173,7 +172,7 @@ class MermaidParser:
                 'subgraphs': subgraphs,
                 'metadata': metadata
             }
-            
+        
         except Exception as e:
             raise ValueError(f"Failed to parse Mermaid diagram: {str(e)}")
 
@@ -182,13 +181,13 @@ class MermaidParser:
         # Match node patterns with various syntax forms
         node_patterns = [
             # ["text"] form
-            r'^\s*(\w+)\s*\["([^"]+)"\]',
+            r'^\s*(\w+)\s*\["([^\]]+)"\]',
             # {"text"} form for decisions
-            r'^\s*(\w+)\s*\{"([^"]+)"\}',
+            r'^\s*(\w+)\s*\{"([^\}]+)"\}',
             # ("text") form
-            r'^\s*(\w+)\s*\("([^"]+)"\)',
+            r'^\s*(\w+)\s*\("([^\)]+)"\)',
             # [("text")] form
-            r'^\s*(\w+)\s*\[\("([^"]+)"\)\]'
+            r'^\s*(\w+)\s*\[\("([^\)]+)"\)\]'
         ]
         
         for pattern in node_patterns:

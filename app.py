@@ -10,7 +10,6 @@ import tempfile
 import os
 from PIL import Image
 import traceback
-
 from parse_mermaid import parse_mermaid, MermaidParser
 from openai_ivr_converter import convert_mermaid_to_ivr
 from openai_converter import process_flow_diagram
@@ -25,23 +24,43 @@ st.set_page_config(
 # Constants and examples
 DEFAULT_FLOWS = {
     "Simple Callout": '''flowchart TD
-    A["Welcome<br/>This is an electric callout from (Level 2).<br/>Press 1, if this is (employee).<br/>Press 3, if you need more time to get (employee) to the phone.<br/>Press 7, if (employee) is not home.<br/>Press 9, to repeat this message."] -->|"input"| B{"1 - this is employee"}
-    A -->|"no input - go to pg 3"| C["30-second message<br/>Press any key to continue..."]
-    A -->|"7 - not home"| D["Employee Not Home"]
-    A -->|"3 - need more time"| C
-    A -->|"retry logic"| A
-    B -->|"yes"| E["Enter Employee PIN"]''',
-    
+    A["Welcome<br/>This is an electric callout from (Level 2).<br/>Press 1, if this is (employee).<br/>Press 3, if you need more time to get (employee) to the phone.<br/>Press 7, if (employee) is not home.<br/>Press 9, to repeat this message."] -->
+    "input"
+    B{"1 - this is employee"}
+    A -->
+    "no input - go to pg 3"
+    C["30-second message<br/>Press any key to continue..."]
+    A -->
+    "7 - not home"
+    D["Employee Not Home"]
+    A -->
+    "3 - need more time"
+    C
+    A -->
+    "retry logic"
+    A
+    B -->
+    "yes"
+    E["Enter Employee PIN"]''',
+
     "PIN Change": '''flowchart TD
     A["Enter PIN"] --> B{"Valid PIN?"}
-    B -->|"No"| C["Invalid Entry"]
-    B -->|"Yes"| D["PIN Changed"]
+    B -->
+    "No"
+    C["Invalid Entry"]
+    B -->
+    "Yes"
+    D["PIN Changed"]
     C --> A''',
-    
+
     "Transfer Flow": '''flowchart TD
     A["Transfer Request"] --> B{"Transfer Available?"}
-    B -->|"Yes"| C["Connect"]
-    B -->|"No"| D["Failed"]
+    B -->
+    "Yes"
+    C["Connect"]
+    B -->
+    "No"
+    D["Failed"]
     C --> E["End"]
     D --> E'''
 }
@@ -162,7 +181,6 @@ def main():
                 st.session_state.last_mermaid_code or "",
                 height=400
             )
-
     else:  # Image Upload
         col1, col2 = st.columns(2)
         
@@ -187,10 +205,10 @@ def main():
             if st.button("🔄 Convert Image to Mermaid"):
                 with st.spinner("Converting image..."):
                     try:
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)) as tmp_file:
                             tmp_file.write(uploaded_file.getvalue())
-                            mermaid_text = process_flow_diagram(tmp_file.name, openai_api_key)
-                            st.session_state.last_mermaid_code = mermaid_text
+                        mermaid_text = process_flow_diagram(tmp_file.name, openai_api_key)
+                        st.session_state.last_mermaid_code = mermaid_text
                         
                         st.success("Image converted successfully!")
                         st.subheader("Generated Mermaid Code")
@@ -214,7 +232,6 @@ def main():
         if not openai_api_key:
             st.error("Please provide an OpenAI API key in the sidebar.")
             return
-
         with st.spinner("Converting to IVR..."):
             try:
                 # Validate diagram if requested
@@ -230,7 +247,6 @@ def main():
                 
                 # Format output
                 output = format_ivr_code(ivr_code, export_format.lower())
-
                 # Show result
                 st.subheader("📤 Generated IVR Configuration")
                 st.code(output, language=export_format.lower())
@@ -260,13 +276,12 @@ def main():
 
                 # Show differences
                 show_code_diff(mermaid_text, output)
-
             except Exception as e:
                 st.error(f"Conversion Error: {str(e)}")
                 if show_debug:
                     st.exception(e)
-                    st.text("Traceback:")
-                    st.text(traceback.format_exc())
+                st.text("Traceback:")
+                st.text(traceback.format_exc())
 
 if __name__ == "__main__":
     main()
