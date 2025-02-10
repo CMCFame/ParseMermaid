@@ -52,15 +52,16 @@ class MermaidIVRConverter:
                 self.parseNode(line, currentSubgraph)
 
     def parseNode(self, line: str, subgraph: Optional[Dict[str, Any]]) -> None:
-        # Regex supports one or two bracket characters
-        pattern = r'^(\w+)\s*([\[\(\{]{1,2})\s*(.+?)\s*([\]\)\}]{1,2})$'
+        # Updated regex: matches node definitions with optional quotes around the text.
+        pattern = r'^(\w+)\s*([\[\(\{])(?:")?(.*?)(?:")?\s*([\]\)\}])$'
         match = re.match(pattern, line)
         if not match:
             return
         node_id, openBracket, content, closeBracket = match.groups()
         node_type = self.getNodeType(openBracket, closeBracket)
-        # Replace HTML <br/> tags with newline and remove extraneous quotes
+        # Replace HTML <br/> tags with newline
         label = re.sub(r'<br\s*/?>', '\n', content)
+        # Remove any residual quotes
         label = label.replace('"', '').replace("'", "").strip()
         node = {
             'id': node_id,
@@ -95,7 +96,8 @@ class MermaidIVRConverter:
         })
 
     def parseInlineNode(self, nodeStr: str) -> str:
-        pattern = r'^(\w+)\s*([\[\(\{]{1,2})\s*(.+?)\s*([\]\)\}]{1,2})$'
+        # Updated regex to allow optional quotes
+        pattern = r'^(\w+)\s*([\[\(\{])(?:")?(.*?)(?:")?\s*([\]\)\}])$'
         match = re.match(pattern, nodeStr)
         if not match:
             return nodeStr  # Return as plain node ID if no inline definition
