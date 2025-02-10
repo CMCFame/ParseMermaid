@@ -86,7 +86,10 @@ def show_code_diff(original: str, converted: str):
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Original Mermaid")
-        st.code(original, language="mermaid")
+        if original and original.strip():
+            st.code(original, language="mermaid")
+        else:
+            st.info("No original Mermaid code available")
     with col2:
         st.subheader("Generated IVR Code")
         st.code(converted, language="javascript")
@@ -138,7 +141,7 @@ def main():
         openai_api_key = st.text_input(
             "OpenAI API Key",
             type="password",
-            help="Required for image processing"
+            help="Required for image/PDF to Mermaid conversion"
         )
 
     # Main content area
@@ -211,52 +214,52 @@ def main():
 
     # Convert button
     if st.button("🔄 Convert to IVR"):
-        if conversion_method == "Image Upload" and not openai_api_key:
-            st.error("Please provide an OpenAI API key for image conversion.")
-            return
-
         with st.spinner("Converting to IVR..."):
             try:
-                if validate_syntax:
+                # Validate syntax if requested
+                if validate_syntax and mermaid_text.strip():
                     error = validate_mermaid(mermaid_text)
                     if error:
                         st.error(error)
                         return
 
-                # Use custom converter directly
-                ivr_code = convert_mermaid_to_ivr(mermaid_text)
-                st.session_state.last_ivr_code = ivr_code
-                output = format_ivr_code(ivr_code, export_format.lower())
+                # Convert to IVR using custom converter
+                if mermaid_text.strip():
+                    ivr_code = convert_mermaid_to_ivr(mermaid_text)
+                    st.session_state.last_ivr_code = ivr_code
+                    output = format_ivr_code(ivr_code, export_format.lower())
 
-                # Show result
-                st.subheader("📤 Generated IVR Configuration")
-                st.code(output, language=export_format.lower())
+                    # Show result
+                    st.subheader("📤 Generated IVR Configuration")
+                    st.code(output, language=export_format.lower())
 
-                # Debug information
-                if show_debug:
-                    with st.expander("Debug Information"):
-                        st.text("Original Response:")
-                        st.code(ivr_code)
-                        st.text("Parsed Nodes:")
-                        try:
-                            json_str = ivr_code[16:-1].strip()
-                            st.json(json.loads(json_str))
-                        except Exception as e:
-                            st.error(f"Parse Error: {str(e)}")
+                    # Debug information
+                    if show_debug:
+                        with st.expander("Debug Information"):
+                            st.text("Original Response:")
+                            st.code(ivr_code)
+                            st.text("Parsed Nodes:")
+                            try:
+                                json_str = ivr_code[16:-1].strip()
+                                st.json(json.loads(json_str))
+                            except Exception as e:
+                                st.error(f"Parse Error: {str(e)}")
 
-                # Download option
-                tmp_file = save_temp_file(output)
-                with open(tmp_file, 'rb') as f:
-                    st.download_button(
-                        label="⬇️ Download Configuration",
-                        data=f,
-                        file_name=f"ivr_flow.{export_format.lower()}",
-                        mime="text/plain"
-                    )
-                os.unlink(tmp_file)
+                    # Download option
+                    tmp_file = save_temp_file(output)
+                    with open(tmp_file, 'rb') as f:
+                        st.download_button(
+                            label="⬇️ Download Configuration",
+                            data=f,
+                            file_name=f"ivr_flow.{export_format.lower()}",
+                            mime="text/plain"
+                        )
+                    os.unlink(tmp_file)
 
-                # Show differences
-                show_code_diff(mermaid_text, output)
+                    # Show differences
+                    show_code_diff(mermaid_text, output)
+                else:
+                    st.error("Please provide Mermaid code to convert")
 
             except Exception as e:
                 st.error(f"Conversion Error: {str(e)}")

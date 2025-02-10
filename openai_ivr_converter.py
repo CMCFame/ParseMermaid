@@ -34,12 +34,18 @@ class MermaidIVRConverter:
         self.connections = []
         self.ivrFlow = []
 
+        # Split into lines and process each line
         lines = mermaid_code.split('\n')
         current_subgraph = None
 
         for line in lines:
             line = line.strip()
+            # Skip empty lines, comments, and flowchart declaration
             if not line or line.startswith('%%') or line.startswith('flowchart'):
+                continue
+
+            # Skip subgraph handling for now
+            if line.startswith('subgraph') or line == 'end' or 'direction' in line:
                 continue
 
             if '-->' in line:
@@ -50,27 +56,33 @@ class MermaidIVRConverter:
         return self._generateIVRFlow()
 
     def _parseNode(self, line: str) -> None:
+        """Parse node definition with enhanced handling"""
+        # Skip subgraph lines
+        if line.startswith('subgraph') or line == 'end':
+            return
+
         node_match = None
         node_type = 'process'
         
-        if '[' in line:
-            node_match = line.split('[', 1)
+        if '[' in line and ']' in line:
+            node_id = line[:line.find('[')].strip()
+            content = line[line.find('[')+1:line.find(']')]
             node_type = 'process'
-        elif '{' in line:
-            node_match = line.split('{', 1)
+        elif '{' in line and '}' in line:
+            node_id = line[:line.find('{')].strip()
+            content = line[line.find('{')+1:line.find('}')]
             node_type = 'decision'
-        elif '(' in line:
-            node_match = line.split('(', 1)
+        elif '(' in line and ')' in line:
+            node_id = line[:line.find('(')].strip()
+            content = line[line.find('(')+1:line.find(')')]
             node_type = 'rounded'
+        else:
+            return
 
-        if node_match:
-            node_id = node_match[0].strip()
-            content = node_match[1]
-            for end_char in [']', '}', ')']:
-                if end_char in content:
-                    content = content.split(end_char)[0]
-            content = content.replace('"', '').strip()
-            
+        # Clean the content
+        content = content.strip('"').strip()
+        
+        if node_id:
             self.nodeMap[node_id] = {
                 'id': node_id,
                 'type': node_type,
@@ -79,15 +91,24 @@ class MermaidIVRConverter:
             }
 
     def _parseConnection(self, line: str) -> None:
+        """Parse connection with label handling"""
+        if '-->' not in line:
+            return
+
         parts = line.split('-->')
         source = parts[0].strip()
         target = parts[1].strip()
         label = None
 
         if '|' in target:
-            label_parts = target.split('|')
-            label = label_parts[0].replace('"', '')
-            target = label_parts[1].strip()
+            split_target = target.split('|')
+            if len(split_target) == 2:
+                label = split_target[0].strip('"').strip()
+                target = split_target[1].strip('"').strip()
+
+        # Clean IDs
+        source = source.split('[')[0].split('{')[0].split('(')[0].strip()
+        target = target.split('[')[0].split('{')[0].split('(')[0].strip()
 
         if source in self.nodeMap:
             self.nodeMap[source]['connections'].append({
@@ -111,7 +132,9 @@ class MermaidIVRConverter:
 
             ivr_flow.append(ivr_node)
 
-        ivr_flow.extend(self._createErrorHandlers())
+        # Add error handlers if flow is not empty
+        if ivr_flow:
+            ivr_flow.extend(self._createErrorHandlers())
         return ivr_flow
 
     def _createDecisionNode(self, node: Dict) -> Dict[str, Any]:
