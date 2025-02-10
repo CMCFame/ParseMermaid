@@ -16,48 +16,50 @@ class IVRPromptLibrary:
     """Enhanced prompting for exact IVR diagram reproduction"""
     
     SYSTEM_PROMPT = """You are a specialized converter focused on creating EXACT, VERBATIM Mermaid.js flowchart representations of IVR call flow diagrams. Your task is to reproduce the input diagram with 100% accuracy, maintaining all text, connections, and flow logic exactly as shown.
+
 CRITICAL REQUIREMENTS:
 1. Text Content:
    - Copy ALL text exactly as written, including punctuation and capitalization
    - Use <br/> for line breaks within nodes
    - Preserve parentheses, special characters, and spacing
    - Include all numbers and reference texts (e.g., "page 25", "Level 2")
+
 2. Node Types:
    - Decision diamonds: Use {"text"} for any decision/question nodes
    - Process rectangles: Use ["text"] for standard process nodes
    - Maintain exact node shapes as shown in the original
+
 3. Connections:
    - Preserve ALL connection labels exactly as written
    - Include retry loops and self-references
    - Maintain connection directions
    - Copy specific button press labels (e.g., "Press 1", "7 - not home")
+
 4. Document Elements:
    - Include headers, titles, and subtitles
    - Preserve footer text and company information
    - Include all notes and references
    - Maintain page numbers and section references
+
 5. Special Elements:
    - Include conditional logic text exactly as shown
    - Preserve system messages and prompts
    - Maintain error handling paths
    - Keep timeout and retry logic
+
 EXAMPLE FORMAT:
 flowchart TD
-    A["Exact Node Text<br/>With line breaks<br/>And formatting"] -->
-    "Exact Label Text"
-    B{"Decision Text<br/>With Options"}
-    B -->
-    "1 - exact option"
-    C["Next Step"]
-    B -->
-    "retry"
-    A
+    A["Exact Node Text<br/>With line breaks<br/>And formatting"] -->|"Exact Label Text"| B{"Decision Text<br/>With Options"}
+    B -->|"1 - exact option"| C["Next Step"]
+    B -->|"retry"| A
+
 ERROR PREVENTION:
 - Do not summarize or simplify text
 - Do not modify connection logic
 - Do not omit any elements
 - Do not change terminology
 - Do not rearrange the flow
+
 OUTPUT REQUIREMENTS:
 - Must start with: flowchart TD
 - Use correct Mermaid.js syntax
@@ -84,7 +86,7 @@ class ImageProcessor:
                 img = img.convert('RGB')
             
             # Resize if too large
-            if img.size > max_size or img.size > max_size:
+            if img.size[0] > max_size[0] or img.size[1] > max_size[1]:
                 img.thumbnail(max_size, Image.Resampling.LANCZOS)
             
             # Enhance contrast for better text recognition
@@ -100,7 +102,7 @@ class ImageProcessor:
         images = convert_from_path(pdf_path, dpi=dpi, first_page=1, last_page=1)
         if not images:
             raise ValueError("Failed to extract image from PDF")
-        return images
+        return images[0]
 
 class FlowchartConverter:
     """Enhanced OpenAI-powered flowchart converter"""
@@ -126,7 +128,7 @@ class FlowchartConverter:
         
         Args:
             file_path: Path to diagram file
-        
+            
         Returns:
             str: Mermaid diagram syntax
         """
@@ -135,7 +137,7 @@ class FlowchartConverter:
             if not os.path.exists(file_path):
                 raise FileNotFoundError(f"File not found: {file_path}")
             
-            file_ext = os.path.splitext(file_path).lower()
+            file_ext = os.path.splitext(file_path)[1].lower()
             supported_formats = {'.pdf', '.png', '.jpg', '.jpeg'}
             
             if file_ext not in supported_formats:
@@ -182,7 +184,7 @@ class FlowchartConverter:
             
             # Extract and clean Mermaid code
             mermaid_text = self._clean_mermaid_code(
-                response.choices.message.content
+                response.choices[0].message.content
             )
             
             # Validate syntax
@@ -192,7 +194,7 @@ class FlowchartConverter:
                 return self._attempt_recovery_conversion(base64_image)
             
             return mermaid_text
-        
+            
         except Exception as e:
             self.logger.error(f"Conversion failed: {str(e)}")
             raise RuntimeError(f"Diagram conversion error: {str(e)}")
@@ -215,9 +217,9 @@ class FlowchartConverter:
     def _validate_mermaid_syntax(self, mermaid_text: str) -> bool:
         """Validate basic Mermaid syntax"""
         required_elements = [
-            r'flowchart\s+TD',  # Must have flowchart definition
-            r'\w+\s*[\["{\(]',  # Must have at least one node
-            r'-->'  # Must have at least one connection
+            r'flowchart\s+TD',    # Must have flowchart definition
+            r'\w+\s*[\["{\(]',    # Must have at least one node
+            r'-->'                # Must have at least one connection
         ]
         
         return all(re.search(pattern, mermaid_text) for pattern in required_elements)
@@ -253,9 +255,9 @@ class FlowchartConverter:
             )
             
             return self._clean_mermaid_code(
-                response.choices.message.content
+                response.choices[0].message.content
             )
-        
+            
         except Exception as e:
             raise RuntimeError(f"Recovery conversion failed: {str(e)}")
 
