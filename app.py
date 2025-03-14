@@ -81,8 +81,8 @@ def render_mermaid_safely(mermaid_text: str):
 def main():
     st.title("🔄 Mermaid-to-IVR Converter")
     st.markdown("""
-    This tool converts flow diagrams into IVR configurations.
-    Supports multiple input methods.
+    This tool converts Mermaid flow diagrams into IVR configurations for call flow systems.
+    IVR output follows standard format: `module.exports = [...];`
     """)
 
     # Initialize session state variables if not already set
@@ -211,8 +211,6 @@ def main():
 
                     if show_debug:
                         with st.expander("Debug Information"):
-                            st.text("Original IVR Response:")
-                            st.code(ivr_code)
                             st.text("Parsed Nodes:")
                             try:
                                 json_str = ivr_code[16:-1].strip()
@@ -220,6 +218,7 @@ def main():
                             except Exception as e:
                                 st.error(f"Parse Error: {str(e)}")
 
+                    # Provide download button
                     tmp_file = save_temp_file(output)
                     with open(tmp_file, 'rb') as f:
                         st.download_button(
@@ -230,6 +229,7 @@ def main():
                         )
                     os.unlink(tmp_file)
 
+                    # Show comparison between original and converted
                     show_code_diff(mermaid_text, output)
 
                 except Exception as e:
