@@ -1,0 +1,414 @@
+/**
+ * Converts Mermaid flowcharts to IVR call flows.
+ * Enhanced to support inline node definitions, HTML in labels, and subgraph direction.
+ */
+class MermaidIVRConverter {
+  constructor(config = {}) {
+    this.config = {
+      defaultMaxTries: 3,
+      defaultMaxTime: 7,
+      defaultErrorPrompt: "callflow:1009",
+      defaultTimeout: 5000,
+      ...config
+    };
+    this.nodes = new Map();
+    this.connections = [];
+    this.subgraphs = [];
+  }
+
+  convert(mermaidCode) {
+    this.parseGraph(mermaidCode);
+    const ivrFlow = this.generateIVRFlow();
+    const validation = this.validateFlow(ivrFlow);
+    if (!validation.isValid) {
+      console.warn("Validation errors:", validation.errors);
+    }
+    return ivrFlow;
+  }
+
+  parseGraph(code) {
+    const lines = code.split('\n').map(line => line.trim()).filter(Boolean);
+    let currentSubgraph = null;
+
+    for (const line of lines) {
+      // Skip Mermaid comments
+      if (line.startsWith('%%')) continue;
+      
+      // Process subgraph start
+      if (line.startsWith('subgraph')) {
+        currentSubgraph = this.parseSubgraph(line);
+        if (currentSubgraph) {
+          this.subgraphs.push(currentSubgraph);
+        }
+        continue;
+      }
+      
+      // Process direction lines inside a subgraph (e.g., "direction TB")
+      if (line.startsWith('direction')) {
+        if (currentSubgraph) {
+          const parts = line.split(/\s+/);
+          if (parts.length > 1) {
+            currentSubgraph.direction = parts[1];
+          }
+        }
+        continue;
+      }
+
+      // End of subgraph block
+      if (line === 'end') {
+        currentSubgraph = null;
+        continue;
+      }
+      
+      // Process connection lines (lines with the arrow)
+      if (line.includes('-->')) {
+        this.parseConnection(line);
+      } 
+      // Process style lines (if defined)
+      else if (line.startsWith('class ')) {
+        this.parseStyle(line);
+      } 
+      // Process node definitions
+      else {
+        this.parseNode(line, currentSubgraph);
+      }
+    }
+  }
+
+  /**
+   * Parses a node definition line.
+   * Supports HTML (e.g. <br/>) and multiple bracket types.
+   */
+  parseNode(line, subgraph) {
+    // Regex matches: nodeId, open bracket (one or two chars), content, closing bracket (one or two chars)
+    const nodeRegex = /^(\w+)\s*([\[\(\{]{1,2})\s*([\s\S]+?)\s*([\]\)\}]{1,2})$/;
+    const match = line.match(nodeRegex);
+    if (!match) return;
+    const [ , id, openBracket, content, closeBracket] = match;
+    const type = this.getNodeType(openBracket, closeBracket);
+    // Convert HTML line breaks to newline characters and remove extraneous quotes
+    const label = content.replace(/<br\s*\/?>/gi, '\n').replace(/["']/g, '').trim();
+    const node = {
+      id,
+      type,
+      label,
+      subgraph: subgraph ? subgraph.id : undefined,
+      isDecision: type === 'decision',
+      connections: []
+    };
+    // Only add if not already defined
+    if (!this.nodes.has(id)) {
+      this.nodes.set(id, node);
+    }
+  }
+
+  /**
+   * If a connection reference includes an inline node definition,
+   * parse it and add it to the node map.
+   */
+  parseInlineNode(nodeStr, subgraph = null) {
+    const nodeRegex = /^(\w+)\s*([\[\(\{]{1,2})\s*([\s\S]+?)\s*([\]\)\}]{1,2})$/;
+    const match = nodeStr.match(nodeRegex);
+    if (!match) return nodeStr; // If no inline definition, assume it's a plain node ID.
+    const [ , id, openBracket, content, closeBracket] = match;
+    if (!this.nodes.has(id)) {
+      const type = this.getNodeType(openBracket, closeBracket);
+      const label = content.replace(/<br\s*\/?>/gi, '\n').replace(/["']/g, '').trim();
+      const node = {
+        id,
+        type,
+        label,
+        subgraph: subgraph ? subgraph.id : undefined,
+        isDecision: type === 'decision',
+        connections: []
+      };
+      this.nodes.set(id, node);
+    }
+    return id;
+  }
+
+  /**
+   * Parses a connection line.
+   * Supports the syntax: A -->|label| B
+   * and will detect inline node definitions in the source or target.
+   */
+  parseConnection(line) {
+    const connRegex = /^(\w+)\s*-->\s*(?:\|([^|]+)\|\s*)?(.+)$/;
+    const match = line.match(connRegex);
+    if (!match) return;
+    let [ , source, label, target] = match;
+    source = source.trim();
+    target = target.trim();
+    label = label ? label.replace(/["']/g, '').replace(/<br\s*\/?>/gi, '\n').trim() : '';
+
+    // Check and process inline node definitions for source and target.
+    if (source.match(/[\[\(\{]/)) {
+      source = this.parseInlineNode(source);
+    }
+    if (target.match(/[\[\(\{]/)) {
+      target = this.parseInlineNode(target);
+    }
+
+    this.connections.push({ source, target, label });
+  }
+
+  /**
+   * Parses a subgraph definition.
+   * Expected syntax: subgraph <id> [optional title in brackets]
+   */
+  parseSubgraph(line) {
+    const subgraphRegex = /^subgraph\s+(\w+)(?:\s*\[([^\]]+)\])?$/;
+    const match = line.match(subgraphRegex);
+    if (!match) return null;
+    const [ , id, title] = match;
+    return {
+      id,
+      title: title ? title.replace(/["']/g, '').trim() : id,
+      direction: null,
+      nodes: []
+    };
+  }
+
+  /**
+   * Parses a style line.
+   * Expected syntax: class <nodeId> <className>
+   */
+  parseStyle(line) {
+    const styleRegex = /^class\s+(\w+)\s+(\w+)/;
+    const match = line.match(styleRegex);
+    if (!match) return;
+    const [ , nodeId, className] = match;
+    if (this.nodes.has(nodeId)) {
+      const node = this.nodes.get(nodeId);
+      node.className = className;
+    }
+  }
+
+  /**
+   * Determines the node type based on the bracket style.
+   */
+  getNodeType(openBracket, closeBracket) {
+    const bracketType = openBracket[0];
+    switch (bracketType) {
+      case '[':
+        return 'process';
+      case '(':
+        // If using double parentheses, consider it a subroutine; otherwise, a terminal node.
+        return openBracket.length === 2 ? 'subroutine' : 'terminal';
+      case '{':
+        return 'decision';
+      default:
+        return 'process';
+    }
+  }
+
+  /**
+   * Generates the IVR flow array from the parsed nodes and connections.
+   */
+  generateIVRFlow() {
+    const ivrFlow = [];
+    const processed = new Set();
+
+    // Process start nodes first (nodes with no incoming connections)
+    const startNodes = this.findStartNodes();
+    for (const nodeId of startNodes) {
+      this.processNode(nodeId, ivrFlow, processed);
+    }
+
+    // Process any remaining nodes
+    for (const nodeId of this.nodes.keys()) {
+      this.processNode(nodeId, ivrFlow, processed);
+    }
+
+    // Append a standard error handler
+    ivrFlow.push(this.createErrorHandlers());
+
+    return ivrFlow;
+  }
+
+  /**
+   * Recursively processes nodes to build the IVR flow.
+   */
+  processNode(nodeId, ivrFlow, processed) {
+    if (processed.has(nodeId)) return;
+    processed.add(nodeId);
+
+    const node = this.nodes.get(nodeId);
+    if (!node) return;
+
+    // Gather outgoing connections for the node.
+    const outgoingConnections = this.connections.filter(c => c.source === nodeId);
+    node.connections = outgoingConnections;
+
+    const ivrNode = this.createIVRNode(node);
+    ivrFlow.push(ivrNode);
+
+    // Recursively process each connected node.
+    for (const conn of outgoingConnections) {
+      this.processNode(conn.target, ivrFlow, processed);
+    }
+  }
+
+  /**
+   * Creates an IVR node for a standard node.
+   */
+  createIVRNode(node) {
+    const base = {
+      label: node.id,
+      log: node.label.replace(/\n/g, ' ')
+    };
+
+    if (node.isDecision) {
+      return this.createDecisionNode(node, base);
+    }
+
+    // For non-decision nodes, if there is exactly one outgoing connection, add a 'goto'
+    const ivrNode = {
+      ...base,
+      playPrompt: `callflow:${node.id}`
+    };
+    if (node.connections.length === 1) {
+      ivrNode.goto = node.connections[0].target;
+    }
+    return ivrNode;
+  }
+
+  /**
+   * Creates an IVR node for decision nodes that require DTMF input.
+   */
+  createDecisionNode(node, base) {
+    const validChoices = node.connections.map((_, idx) => String(idx + 1));
+    return {
+      ...base,
+      playPrompt: `callflow:${node.id}`,
+      getDigits: {
+        numDigits: 1,
+        maxTries: this.config.defaultMaxTries,
+        maxTime: this.config.defaultMaxTime,
+        validChoices: validChoices.join('|'),
+        errorPrompt: this.config.defaultErrorPrompt,
+        nonePrompt: this.config.defaultErrorPrompt
+      },
+      branch: {
+        ...node.connections.reduce((acc, conn, idx) => {
+          acc[String(idx + 1)] = conn.target;
+          return acc;
+        }, {}),
+        error: 'Problems',
+        none: 'Problems'
+      }
+    };
+  }
+
+  /**
+   * Returns a standard error handler IVR node.
+   */
+  createErrorHandlers() {
+    return {
+      label: 'Problems',
+      nobarge: '1',
+      playLog: "I'm sorry you are having problems.",
+      playPrompt: 'callflow:1351',
+      goto: 'hangup'
+    };
+  }
+
+  /**
+   * Determines the start nodes (nodes with no incoming connections).
+   */
+  findStartNodes() {
+    const hasIncoming = new Set(this.connections.map(c => c.target));
+    return Array.from(this.nodes.keys()).filter(nodeId => !hasIncoming.has(nodeId));
+  }
+
+  /**
+   * Validates the generated IVR flow.
+   */
+  validateFlow(flow) {
+    const errors = [];
+    const labels = new Set();
+
+    flow.forEach((node, index) => {
+      // Ensure each node has a label.
+      if (!node.label) {
+        errors.push(`Node at index ${index} missing label`);
+      }
+      // Check for duplicate labels.
+      if (node.label && labels.has(node.label)) {
+        errors.push(`Duplicate label: ${node.label}`);
+      }
+      labels.add(node.label);
+
+      // Validate branch targets.
+      if (node.branch) {
+        Object.values(node.branch).forEach(target => {
+          if (!labels.has(target) && !['Problems', 'hangup', 'MainMenu'].includes(target)) {
+            errors.push(`Invalid branch target: ${target} in ${node.label}`);
+          }
+        });
+      }
+
+      // Validate goto targets.
+      if (node.goto && !labels.has(node.goto) && !['Problems', 'hangup', 'MainMenu'].includes(node.goto)) {
+        errors.push(`Invalid goto target: ${node.goto} in ${node.label}`);
+      }
+    });
+
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  }
+}
+
+// Example usage:
+const converter = new MermaidIVRConverter({
+  defaultMaxTries: 3,
+  defaultMaxTime: 7,
+  defaultErrorPrompt: "callflow:1009",
+  defaultTimeout: 5000
+});
+
+const mermaidCode = `
+flowchart TD
+A["Welcome<br/>This is an electric callout from (Level 2).<br/>Press 1, if this is (employee).<br/>Press 3, if you need more time to get (employee) to the phone.<br/>Press 7, if (employee) is not home.<br/>Press 9, to repeat this message."] -->|input| B{"1 - this is employee"}
+A -->|no input - go to pg 3| C["30-second message<br/>Press any key to<br/>continue..."]
+A -->|7 - not home| D["Employee Not Home<br/>Please have<br/>(employee) call the<br/>(Level 2) Callout<br/>System at<br/>866-502-7267."]
+A -->|3 - need more time| C
+A -->|9 - repeat, or invalid input| A
+A -->|retry logic| A
+B -->|Entered digits?| E{"no"}
+E -->|retry| F["Invalid Entry<br/>Invalid entry.<br/>Please try again."]
+F -->|retry| A
+E -->|yes| G{"Correct PIN?"}
+G -->|no| F
+G -->|yes| H["Electric Callout<br/>This is an electric callout."]
+H --> I["Callout Reason<br/>The callout reason is (callout reason)."]
+I --> J["Trouble Location<br/>The trouble location is (trouble location)."]
+J --> K["Custom Message<br/>(Play custom message, if selected.)"]
+K --> L{"Available For Callout<br/>Are you available to work this callout?<br/>If yes, press 1. If no, press 3.<br/>If no one else accepts, and you want to be called again, press 9."}
+L -->|1 - accept| M["Accepted Response<br/>An accepted response has<br/>been recorded."]
+L -->|3 - decline| N["Callout Decline<br/>Your response is being recorded as a decline."]
+L -->|9 - call back| O["Qualified No<br/>You may be called again on this<br/>callout if no one accepts."]
+L -->|invalid or no input| P["Invalid Entry<br/>Invalid entry.<br/>Please try again."]
+P -->|retry| L
+M --> Q["Goodbye<br/>Thank you.<br/>Goodbye."]
+N --> Q
+O --> Q
+Q --> R["Disconnect"]
+D --> R
+C --> A
+F --> A
+subgraph Header
+direction TB
+Title["ARCOS - Telephone Script<br/>Outbound Callout Script<br/>Electric Callout - Live Answer"]
+Info["ARCOS<br/>Customer ID: TEG<br/>Revised: 6/13/2016<br/>Page: 2 of 48"]
+end
+subgraph Footer
+direction TB
+Notes["Notes:<br/>1) For the Retry Logic - refer to page 25.<br/>2) For QA callouts, 'This is a test call from QA' will be spoken<br/>after the company name.<br/>ARCOS LLC<br/>Confidential and Proprietary Information"]
+end
+`;
+
+const ivrFlow = converter.convert(mermaidCode);
+console.log(JSON.stringify(ivrFlow, null, 2));
