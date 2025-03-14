@@ -5,8 +5,6 @@ and enforced workflow steps.
 import streamlit as st
 import streamlit_mermaid as st_mermaid
 import json
-import yaml
-from typing import Optional, Dict, Any
 import tempfile
 import os
 from PIL import Image
@@ -32,13 +30,13 @@ A -->|"7 - not home"| D["Employee Not Home"]
 A -->|"3 - need more time"| C
 A -->|"retry logic"| A
 B -->|"yes"| E["Enter Employee PIN"]''',
-    
+
     "PIN Change": '''flowchart TD
 A["Enter PIN"] --> B{"Valid PIN?"}
 B -->|"No"| C["Invalid Entry"]
 B -->|"Yes"| D["PIN Changed"]
 C --> A''',
-    
+
     "Transfer Flow": '''flowchart TD
 A["Transfer Request"] --> B{"Transfer Available?"}
 B -->|"Yes"| C["Connect"]
@@ -53,7 +51,7 @@ def save_temp_file(content: str, suffix: str = '.js') -> str:
         f.write(content)
         return f.name
 
-def validate_mermaid(mermaid_text: str) -> Optional[str]:
+def validate_mermaid(mermaid_text: str) -> str:
     """Validate Mermaid diagram syntax"""
     try:
         parser = MermaidParser()
@@ -61,26 +59,6 @@ def validate_mermaid(mermaid_text: str) -> Optional[str]:
         return None
     except Exception as e:
         return f"Diagram Validation Error: {str(e)}"
-
-def format_ivr_code(ivr_code: str, format_type: str = 'javascript') -> str:
-    """Format IVR code according to selected output format"""
-    try:
-        if format_type == 'javascript':
-            return ivr_code
-        
-        # Extract JSON array from module.exports
-        json_str = ivr_code[16:-1].strip()  # Remove "module.exports = " and ";"
-        data = json.loads(json_str)
-        
-        if format_type == 'json':
-            return json.dumps(data, indent=2)
-        elif format_type == 'yaml':
-            return yaml.dump(data, allow_unicode=True)
-        else:
-            raise ValueError(f"Unsupported format: {format_type}")
-    except Exception as e:
-        st.error(f"Format Error: {str(e)}")
-        return ivr_code
 
 def show_code_diff(original: str, converted: str):
     """Show comparison of original and converted code"""
@@ -104,7 +82,7 @@ def main():
     st.title("🔄 Mermaid-to-IVR Converter")
     st.markdown("""
     This tool converts flow diagrams into IVR configurations.
-    Supports multiple input methods and formats.
+    Supports multiple input methods.
     """)
 
     # Initialize session state variables if not already set
@@ -121,12 +99,6 @@ def main():
         conversion_method = st.radio(
             "Input Method",
             ["Mermaid Editor", "Image Upload"]
-        )
-        
-        # Export format selection
-        export_format = st.radio(
-            "Export Format",
-            ["JavaScript", "JSON", "YAML"]
         )
         
         # Advanced settings
@@ -169,9 +141,7 @@ def main():
 
     else:  # Image Upload method
         col1, col2 = st.columns(2)
-        
         with col1:
-            # File uploader for image/PDF
             uploaded_file = st.file_uploader(
                 "Upload Flowchart",
                 type=['pdf', 'png', 'jpg', 'jpeg']
@@ -184,7 +154,6 @@ def main():
                 except Exception as e:
                     st.error(f"Error loading image: {str(e)}")
         
-        # Only enable conversion if both an API key and an image are provided
         if uploaded_file and openai_api_key:
             if st.button("🔄 Convert Image to Mermaid"):
                 with st.spinner("Converting image..."):
@@ -208,8 +177,8 @@ def main():
                 st.info("Please provide an OpenAI API key in the sidebar to enable image conversion.")
             if not uploaded_file:
                 st.info("Please upload an image or PDF for conversion.")
-
-        # If there is already converted mermaid code from a previous conversion, load it
+        
+        # Load any existing mermaid code from session state
         mermaid_text = st.session_state.last_mermaid_code
 
     # Preview the Mermaid diagram (if available)
@@ -224,7 +193,6 @@ def main():
         if st.button("🔄 Convert to IVR"):
             with st.spinner("Converting to IVR..."):
                 try:
-                    # Validate diagram if requested
                     if validate_syntax:
                         error = validate_mermaid(mermaid_text)
                         if error:
@@ -235,14 +203,12 @@ def main():
                     ivr_code = convert_mermaid_to_ivr(mermaid_text)
                     st.session_state.last_ivr_code = ivr_code
                     
-                    # Format the IVR output
-                    output = format_ivr_code(ivr_code, export_format.lower())
+                    # Use the raw IVR code output (JavaScript module format)
+                    output = ivr_code
 
-                    # Display the generated IVR configuration
                     st.subheader("📤 Generated IVR Configuration")
-                    st.code(output, language=export_format.lower())
+                    st.code(output, language="javascript")
 
-                    # Optionally show debug information
                     if show_debug:
                         with st.expander("Debug Information"):
                             st.text("Original IVR Response:")
@@ -254,18 +220,16 @@ def main():
                             except Exception as e:
                                 st.error(f"Parse Error: {str(e)}")
 
-                    # Provide a download option for the IVR configuration
                     tmp_file = save_temp_file(output)
                     with open(tmp_file, 'rb') as f:
                         st.download_button(
-                            label="⬇️ Download Configuration",
+                            label="⬇️ Download IVR Configuration",
                             data=f,
-                            file_name=f"ivr_flow.{export_format.lower()}",
+                            file_name="ivr_flow.js",
                             mime="text/plain"
                         )
                     os.unlink(tmp_file)
 
-                    # Show side-by-side diff of Mermaid and IVR code
                     show_code_diff(mermaid_text, output)
 
                 except Exception as e:
