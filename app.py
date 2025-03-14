@@ -7,11 +7,13 @@ import streamlit_mermaid as st_mermaid
 import json
 import tempfile
 import os
+import re
+import datetime
 from PIL import Image
 import traceback
 
 from parse_mermaid import parse_mermaid, MermaidParser
-from improved_converter import convert_mermaid_to_ivr  # Use enhanced converter
+from mermaid_ivr_converter import convert_mermaid_to_ivr  # Use original converter
 from openai_converter import process_flow_diagram
 
 # Page configuration
@@ -20,6 +22,165 @@ st.set_page_config(
     page_icon="🔄",
     layout="wide"
 )
+
+# Enhanced conversion logic (embedded directly instead of importing)
+def enhance_ivr_output(ivr_code):
+    """
+    Enhance the output of the original converter to match real IVR format.
+    This improves the labels, structure, and callflow IDs to match production code.
+    """
+    try:
+        # Extract the nodes array
+        nodes_match = re.search(r'module\.exports\s*=\s*(\[.+\]);', ivr_code, re.DOTALL)
+        if not nodes_match:
+            return ivr_code
+            
+        nodes_json = nodes_match.group(1)
+        nodes = json.loads(nodes_json)
+        
+        # Dev date for "Live Answer" node
+        dev_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Standard callflow IDs mapping
+        callflow_ids = {
+            "welcome": "1210",
+            "notification": "1210",
+            "press_1": "1002",
+            "press_3": "1005",
+            "not_home": "1004",
+            "need_more_time": "1006",
+            "repeat_message": "1643", 
+            "pin_entry": "1008",
+            "invalid_input": "1009",
+            "timeout": "1010",
+            "accept": "1167",
+            "decline": "1021",
+            "qualified_no": "1266",
+            "callout": "1274",
+            "wait_message": "1265",
+            "goodbye": "1029",
+            "error": "1351"
+        }
+        
+        # Improve node labels and structure
+        enhanced_nodes = []
+        
+        # Try to identify main nodes
+        welcome_node = None
+        for node in nodes:
+            if "Welcome" in node.get("log", "") or "This is" in node.get("log", ""):
+                welcome_node = node
+                break
+        
+        for node in nodes:
+            enhanced_node = node.copy()
+            
+            # Improve label based on content
+            log_content = node.get("log", "").lower()
+            
+            # Better labeling
+            if "welcome" in log_content or "this is" in log_content:
+                enhanced_node["label"] = "Live Answer"
+                enhanced_node["log"] = f"Dev Date: {dev_date}"
+                enhanced_node["maxLoop"] = ["Main", 3, "Problems"]
+            elif "invalid" in log_content:
+                enhanced_node["label"] = "Invalid Entry"
+            elif "not home" in log_content:
+                enhanced_node["label"] = "Not Home"
+                enhanced_node["nobarge"] = "1"
+            elif "pin" in log_content:
+                enhanced_node["label"] = "Enter PIN"
+            elif "accept" in log_content:
+                enhanced_node["label"] = "Accept"
+                enhanced_node["nobarge"] = "1"
+            elif "decline" in log_content:
+                enhanced_node["label"] = "Decline"
+                enhanced_node["nobarge"] = "1"
+            elif "goodbye" in log_content or "thank you" in log_content:
+                enhanced_node["label"] = "Goodbye"
+                enhanced_node["nobarge"] = "1"
+            elif "press any key" in log_content:
+                enhanced_node["label"] = "Sleep"
+            
+            # Convert playPrompt to array if it's not already
+            if "playPrompt" in enhanced_node and not isinstance(enhanced_node["playPrompt"], list):
+                # Try to map to standard callflow IDs
+                prompt = enhanced_node["playPrompt"]
+                if prompt.startswith("callflow:"):
+                    node_id = prompt[9:]
+                    
+                    # Map to standard IDs when possible
+                    if "welcome" in log_content or "this is" in log_content:
+                        enhanced_node["playPrompt"] = ["callflow:1210"]
+                    elif "invalid" in log_content:
+                        enhanced_node["playPrompt"] = ["callflow:1009"]
+                    elif "not home" in log_content:
+                        enhanced_node["playPrompt"] = ["callflow:1004"]
+                    elif "pin" in log_content:
+                        enhanced_node["playPrompt"] = ["callflow:1008"]
+                    elif "accept" in log_content:
+                        enhanced_node["playPrompt"] = ["callflow:1167"]
+                    elif "goodbye" in log_content:
+                        enhanced_node["playPrompt"] = ["callflow:1029"]
+                    else:
+                        # Keep original but make it an array
+                        enhanced_node["playPrompt"] = [prompt]
+            
+            # Convert playLog to array if it contains multiple lines
+            if "log" in enhanced_node and not isinstance(enhanced_node["log"], list):
+                log_content = enhanced_node["log"]
+                if "\n" in log_content:
+                    lines = [line.strip() for line in log_content.split("\n") if line.strip()]
+                    enhanced_node["playLog"] = lines
+            
+            # Improve getDigits structure
+            if "getDigits" in enhanced_node:
+                get_digits = enhanced_node["getDigits"]
+                # Add standard fields if missing
+                if "maxTries" not in get_digits:
+                    get_digits["maxTries"] = 3
+                if "maxTime" not in get_digits:
+                    get_digits["maxTime"] = 7
+                if "errorPrompt" not in get_digits:
+                    get_digits["errorPrompt"] = "callflow:1009"
+            
+            # Add standard error handling to branch
+            if "branch" in enhanced_node:
+                branch = enhanced_node["branch"]
+                if "error" not in branch:
+                    branch["error"] = "Problems"
+                if "none" not in branch:
+                    branch["none"] = "Problems"
+            
+            enhanced_nodes.append(enhanced_node)
+        
+        # Add standard nodes if missing
+        node_labels = [node.get("label") for node in enhanced_nodes]
+        
+        if "Problems" not in node_labels:
+            enhanced_nodes.append({
+                "label": "Problems",
+                "nobarge": "1",
+                "playLog": "I'm sorry you are having problems.",
+                "playPrompt": "callflow:1351",
+                "goto": "Goodbye"
+            })
+            
+        if "Goodbye" not in node_labels:
+            enhanced_nodes.append({
+                "label": "Goodbye", 
+                "log": "Thank you. Goodbye.",
+                "playPrompt": "callflow:1029",
+                "nobarge": "1",
+                "goto": "hangup"
+            })
+        
+        # Return the enhanced IVR code
+        return "module.exports = " + json.dumps(enhanced_nodes, indent=2) + ";"
+    except Exception as e:
+        # If any error occurs, return the original
+        print(f"Error enhancing IVR: {str(e)}")
+        return ivr_code
 
 # Constants and examples
 DEFAULT_FLOWS = {
@@ -221,12 +382,15 @@ def main():
                             st.error(error)
                             return
 
-                    # Convert to IVR using the enhanced converter
+                    # Convert to IVR using the original converter
                     ivr_code = convert_mermaid_to_ivr(mermaid_text)
-                    st.session_state.last_ivr_code = ivr_code
                     
-                    # Use the raw IVR code output
-                    output = ivr_code
+                    # Enhance the output to match real IVR code format
+                    enhanced_ivr_code = enhance_ivr_output(ivr_code)
+                    st.session_state.last_ivr_code = enhanced_ivr_code
+                    
+                    # Use the enhanced IVR code
+                    output = enhanced_ivr_code
 
                     st.subheader("📤 Generated IVR Configuration")
                     st.code(output, language="javascript")
@@ -235,7 +399,7 @@ def main():
                         with st.expander("Debug Information"):
                             st.text("Parsed Nodes:")
                             try:
-                                json_str = ivr_code[16:-1].strip()
+                                json_str = output[16:-1].strip()
                                 st.json(json.loads(json_str))
                             except Exception as e:
                                 st.error(f"Parse Error: {str(e)}")
