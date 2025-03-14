@@ -11,7 +11,7 @@ from PIL import Image
 import traceback
 
 from parse_mermaid import parse_mermaid, MermaidParser
-from mermaid_ivr_converter import convert_mermaid_to_ivr  # Use local converter
+from improved_converter import convert_mermaid_to_ivr  # Use enhanced converter
 from openai_converter import process_flow_diagram
 
 # Page configuration
@@ -42,7 +42,29 @@ A["Transfer Request"] --> B{"Transfer Available?"}
 B -->|"Yes"| C["Connect"]
 B -->|"No"| D["Failed"]
 C --> E["End"]
-D --> E'''
+D --> E''',
+
+    "Notification Flow": '''flowchart TD
+A["Welcome<br/>This is an IMPORTANT notification. It is (dow, date, time, time zone).<br/>Press 1 if this is (employee/contact).<br/>Press 3 if you need more time to get (employee/contact) to the phone.<br/>Press 7 if (employee/contact) is not home.<br/>Press 9 to repeat this message."] -->|"9 - repeat or invalid input"| A
+A -->|"retry logic<br/>(max 2x)"| A
+A -->|"no input - go to pg 21"| B["90-second message<br/>Press any key to continue..."]
+A -->|"3 - need more time"| B
+A -->|"7 - not home"| C{"Employee or<br/>Contact?"}
+A -->|"1 - this is employee"| G["Custom Message<br/>(Play selected custom message.)"]
+B --> A
+C -->|"Employee"| D["Employee Not Home<br/>Please have (employee) call the (Level 2) Callout System at 866-502-7267."]
+C -->|"Contact"| E["Contact Not Home<br/>Please inform the contact that a (Level 2) Notification occurred at (time) on (dow, date)."]
+D --> F["Goodbye<br/>Thank you.<br/>Goodbye."]
+E --> F
+F --> L["Disconnect"]
+G --> H["Confirm<br/>To confirm receipt of this message, press 1.<br/>To replay the message, press 3."]
+H -->|"3 - repeat"| G
+H -->|"invalid input<br/>no input"| I["Invalid Entry<br/>Invalid entry.<br/>Please try again."]
+H -->|"1 - accept"| J["Accepted Response<br/>You have accepted receipt of this message."]
+I -->|"retry"| H
+J --> K["Goodbye<br/>Thank you.<br/>Goodbye."]
+K --> L
+'''
 }
 
 def save_temp_file(content: str, suffix: str = '.js') -> str:
@@ -81,8 +103,8 @@ def render_mermaid_safely(mermaid_text: str):
 def main():
     st.title("🔄 Mermaid-to-IVR Converter")
     st.markdown("""
-    This tool converts Mermaid flow diagrams into IVR configurations for call flow systems.
-    IVR output follows standard format: `module.exports = [...];`
+    This tool converts Mermaid flow diagrams into ARCOS IVR configurations in standard format.
+    The generated code follows the exact structure used in production IVR callflow systems.
     """)
 
     # Initialize session state variables if not already set
@@ -199,11 +221,11 @@ def main():
                             st.error(error)
                             return
 
-                    # Convert to IVR using the local converter
+                    # Convert to IVR using the enhanced converter
                     ivr_code = convert_mermaid_to_ivr(mermaid_text)
                     st.session_state.last_ivr_code = ivr_code
                     
-                    # Use the raw IVR code output (JavaScript module format)
+                    # Use the raw IVR code output
                     output = ivr_code
 
                     st.subheader("📤 Generated IVR Configuration")
