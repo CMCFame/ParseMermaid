@@ -1,5 +1,5 @@
 """
-Enhanced OpenAI converter with IVR-specific capabilities
+Enhanced OpenAI converter with IVR-specific prompt improvements
 """
 import os
 import re
@@ -15,64 +15,54 @@ from openai import OpenAI
 class IVRPromptLibrary:
     """Enhanced prompting for exact IVR diagram reproduction"""
     
-    SYSTEM_PROMPT = """You are a specialized converter focused on creating EXACT, VERBATIM Mermaid.js flowchart representations of IVR call flow diagrams. Your task is to reproduce the input diagram with 100% accuracy, maintaining all text, connections, and flow logic exactly as shown.
+    SYSTEM_PROMPT = """You are a specialized converter focused on creating EXACT, VERBATIM Mermaid.js flowchart representations of IVR call flow diagrams. Your task is to reproduce only the active flow elements from the input diagram with 100% accuracy, maintaining all text, connections, and flow logic exactly as shown.
 
 CRITICAL REQUIREMENTS:
-1. Text Content:
-   - Copy ALL text exactly as written, including punctuation and capitalization
+1. Include ONLY the active flowchart nodes and connections. DO NOT include:
+   - Notes or comments sections
+   - Footer information
+   - Class definitions
+   - Subgraphs for documentation
+   - Decoration or styling elements
+   - Company information or confidentiality statements
+   - Page numbers, references, or other non-flow metadata
+
+2. Node Content:
+   - Copy node text exactly as written, including punctuation and capitalization
    - Use <br/> for line breaks within nodes
    - Preserve parentheses, special characters, and spacing
-   - Include all numbers and reference texts (e.g., "page 25", "Level 2")
+   - Include all numbers and reference texts related to the actual call flow
 
-2. Node Types:
+3. Node Types:
    - Decision diamonds: Use {"text"} for any decision/question nodes
    - Process rectangles: Use ["text"] for standard process nodes
    - Maintain exact node shapes as shown in the original
 
-3. Connections:
+4. Connections:
    - Preserve ALL connection labels exactly as written
    - Include retry loops and self-references
    - Maintain connection directions
    - Copy specific button press labels (e.g., "Press 1", "7 - not home")
 
-4. Document Elements:
-   - Include headers, titles, and subtitles
-   - Preserve footer text and company information
-   - Include all notes and references
-   - Maintain page numbers and section references
-
-5. Special Elements:
-   - Include conditional logic text exactly as shown
-   - Preserve system messages and prompts
-   - Maintain error handling paths
-   - Keep timeout and retry logic
-
-EXAMPLE FORMAT:
-flowchart TD
-    A["Exact Node Text<br/>With line breaks<br/>And formatting"] -->|"Exact Label Text"| B{"Decision Text<br/>With Options"}
-    B -->|"1 - exact option"| C["Next Step"]
-    B -->|"retry"| A
-
-ERROR PREVENTION:
-- Do not summarize or simplify text
-- Do not modify connection logic
-- Do not omit any elements
-- Do not change terminology
-- Do not rearrange the flow
+5. Format Requirements:
+   - Start with: flowchart TD
+   - Use uppercase single letters for node IDs (A, B, C, etc.)
+   - No styling, class definitions, or subgraph elements
+   - No comments, notes, or documentation blocks
 
 OUTPUT REQUIREMENTS:
-- Must start with: flowchart TD
-- Use correct Mermaid.js syntax
-- Preserve exact diagram structure
-- Include all original elements
-- Maintain visual hierarchy"""
+- Must be valid Mermaid.js syntax
+- Must contain ONLY the active flow elements
+- Must preserve exact node text and connection labels
+- Must use correct node types (diamonds for decisions, rectangles for processes)
+- Must NOT include any documentation, notes, or non-flow elements"""
 
     ERROR_RECOVERY = """If conversion is unclear:
-1. Focus on exact text reproduction first
-2. Maintain all connection paths exactly
-3. Preserve decision logic precisely
-4. Keep all labeling and numbering
-5. Include every element shown"""
+1. Focus on capturing only the core flow elements (nodes and connections)
+2. Exclude all documentation, notes, and non-flow elements
+3. Simplify to just the active call flow
+4. Maintain the exact node text and connection labels for included elements
+5. Use only standard Mermaid.js flowchart syntax with no advanced features"""
 
 class ImageProcessor:
     """Enhanced image processing capabilities"""
@@ -130,7 +120,7 @@ class FlowchartConverter:
             file_path: Path to diagram file
             
         Returns:
-            str: Mermaid diagram syntax
+            str: Mermaid diagram syntax with only active flow elements
         """
         try:
             # Validate file
@@ -154,7 +144,7 @@ class FlowchartConverter:
             image.save(buffered, format="PNG")
             base64_image = base64.b64encode(buffered.getvalue()).decode()
             
-            # Make API call
+            # Make API call with improved prompt
             response = self.client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
@@ -167,7 +157,7 @@ class FlowchartConverter:
                         "content": [
                             {
                                 "type": "text",
-                                "text": "Convert this IVR flow diagram to Mermaid syntax EXACTLY as shown. Maintain all text, connections, and formatting precisely."
+                                "text": "Convert this IVR flow diagram to Mermaid syntax, including ONLY the active flow elements (nodes and connections). Do NOT include any notes, comments, footer information, or non-flow elements."
                             },
                             {
                                 "type": "image_url",
@@ -212,7 +202,25 @@ class FlowchartConverter:
         
         # Clean up whitespace and empty lines
         lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-        return '\n'.join(lines)
+        
+        # Remove any class definitions, subgraphs, or comments
+        filtered_lines = []
+        in_subgraph = False
+        for line in lines:
+            if line.startswith('%%'):
+                continue
+            if line.startswith('subgraph'):
+                in_subgraph = True
+                continue
+            if line == 'end' and in_subgraph:
+                in_subgraph = False
+                continue
+            if line.startswith('class'):
+                continue
+            if not in_subgraph:
+                filtered_lines.append(line)
+        
+        return '\n'.join(filtered_lines)
 
     def _validate_mermaid_syntax(self, mermaid_text: str) -> bool:
         """Validate basic Mermaid syntax"""
@@ -239,7 +247,7 @@ class FlowchartConverter:
                         "content": [
                             {
                                 "type": "text",
-                                "text": "Convert this diagram with exact text reproduction and maintain all connections precisely."
+                                "text": "Convert ONLY the active call flow elements from this diagram to Mermaid syntax. Exclude ALL notes, comments, documentation, and non-flow elements."
                             },
                             {
                                 "type": "image_url",
