@@ -1,22 +1,18 @@
 """
-Enhanced Streamlit app for IVR flow conversion with improved Mermaid-to-IVR
-conversion that produces exact format IVR code.
+Streamlit app for IVR flow conversion with enhanced OpenAI integration
+and enforced workflow steps.
 """
 import streamlit as st
 import streamlit_mermaid as st_mermaid
 import json
 import tempfile
 import os
-import base64
 from PIL import Image
 import traceback
-from datetime import datetime
 
-from parse_mermaid import parse_mermaid
-from openai_converter import convert_image_to_mermaid, process_flow_diagram
-
-# Import exact format IVR converter
-from mermaid_ivr_converter import convert_mermaid_to_ivr
+from parse_mermaid import parse_mermaid, MermaidParser
+from mermaid_ivr_converter import convert_mermaid_to_ivr  # Use local converter
+from openai_converter import process_flow_diagram
 
 # Page configuration
 st.set_page_config(
@@ -28,24 +24,12 @@ st.set_page_config(
 # Constants and examples
 DEFAULT_FLOWS = {
     "Simple Callout": '''flowchart TD
-A["Welcome<br/>This is an IMPORTANT notification. It is (dow, date, time, time zone).<br/>Press 1 if this is (employee/contact).<br/>Press 3 if you need more time to get (employee/contact) to the phone.<br/>Press 7 if (employee/contact) is not home.<br/>Press 9 to repeat this message."] -->|"input"| B{"9 - repeat or invalid input"}
-B --> A
-B -->|"7 - not home"| C{"Employee or<br/>Contact?"}
-B -->|"3 - need more time"| D["90-second message<br/>Press any key to continue..."]
-B -->|"no input"| D
-B -->|"1 - this is employee"| E["Custom Message<br/>(Play selected custom message.)"]
-C -->|"Employee"| F["Employee Not Home<br/>Please have<br/>(employee) call the<br/>(Level 2) Callout<br/>System at<br/>866-502-7267."]
-C -->|"Contact"| G["Contact Not Home<br/>Please inform the<br/>contact that a (Level<br/>2) Notification<br/>occurred at (time)<br/>on (dow, date)."]
-E -->|"input"| H{"Confirm<br/>To confirm receipt of this<br/>message, press 1.<br/>To replay the message,<br/>press 3."}
-H -->|"1 - accept"| I["Accepted Response<br/>You have accepted<br/>receipt of this message."]
-H -->|"3 - repeat"| E
-H -->|"invalid input"| J["Invalid Entry.<br/>Invalid entry.<br/>Please try again."]
-H -->|"no input"| J
-J --> H
-I --> K["Goodbye<br/>Thank you.<br/>Goodbye."]
-K --> L["Disconnect"]
-F --> K
-G --> K''',
+A["Welcome<br/>This is an electric callout from (Level 2).<br/>Press 1, if this is (employee).<br/>Press 3, if you need more time to get (employee) to the phone.<br/>Press 7, if (employee) is not home.<br/>Press 9, to repeat this message."] -->|"input"| B{"1 - this is employee"}
+A -->|"no input - go to pg 3"| C["30-second message<br/>Press any key to continue..."]
+A -->|"7 - not home"| D["Employee Not Home"]
+A -->|"3 - need more time"| C
+A -->|"retry logic"| A
+B -->|"yes"| E["Enter Employee PIN"]''',
 
     "PIN Change": '''flowchart TD
 A["Enter PIN"] --> B{"Valid PIN?"}
@@ -70,10 +54,8 @@ def save_temp_file(content: str, suffix: str = '.js') -> str:
 def validate_mermaid(mermaid_text: str) -> str:
     """Validate Mermaid diagram syntax"""
     try:
-        # Just check if we can parse it
-        result = parse_mermaid(mermaid_text)
-        if not result:
-            return "Diagram parsing failed. Check syntax."
+        parser = MermaidParser()
+        parser.parse(mermaid_text)
         return None
     except Exception as e:
         return f"Diagram Validation Error: {str(e)}"
@@ -99,8 +81,8 @@ def render_mermaid_safely(mermaid_text: str):
 def main():
     st.title("🔄 Mermaid-to-IVR Converter")
     st.markdown("""
-    This tool converts call flow diagrams into IVR configurations with exact format matching.
-    Upload an image of a flowchart or create one using Mermaid syntax.
+    This tool converts flow diagrams into IVR configurations.
+    Supports multiple input methods.
     """)
 
     # Initialize session state variables if not already set
@@ -176,24 +158,20 @@ def main():
             if st.button("🔄 Convert Image to Mermaid"):
                 with st.spinner("Converting image..."):
                     try:
-                        # Set API key
-                        os.environ["OPENAI_API_KEY"] = openai_api_key
-                        
-                        # Convert image to Mermaid
-                        mermaid_text, error = convert_image_to_mermaid(uploaded_file)
-                        
-                        if error:
-                            st.error(f"Conversion Error: {error}")
-                        else:
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
+                            tmp_file.write(uploaded_file.getvalue())
+                            mermaid_text = process_flow_diagram(tmp_file.name, openai_api_key)
                             st.session_state.last_mermaid_code = mermaid_text
-                            st.success("Image converted successfully!")
-                            st.subheader("Generated Mermaid Code")
-                            st.code(mermaid_text, language="mermaid")
-                            
+                        st.success("Image converted successfully!")
+                        st.subheader("Generated Mermaid Code")
+                        st.code(mermaid_text, language="mermaid")
                     except Exception as e:
                         st.error(f"Conversion Error: {str(e)}")
                         if show_debug:
                             st.exception(e)
+                    finally:
+                        if 'tmp_file' in locals():
+                            os.unlink(tmp_file.name)
         else:
             if not openai_api_key:
                 st.info("Please provide an OpenAI API key in the sidebar to enable image conversion.")
@@ -221,32 +199,38 @@ def main():
                             st.error(error)
                             return
 
-                    # Convert to IVR using the improved exact format converter
+                    # Convert to IVR using the local converter
                     ivr_code = convert_mermaid_to_ivr(mermaid_text)
                     st.session_state.last_ivr_code = ivr_code
                     
+                    # Use the raw IVR code output (JavaScript module format)
+                    output = ivr_code
+
                     st.subheader("📤 Generated IVR Configuration")
-                    st.code(ivr_code, language="javascript")
+                    st.code(output, language="javascript")
 
                     if show_debug:
                         with st.expander("Debug Information"):
-                            st.text("Mermaid Code Structure:")
+                            st.text("Original IVR Response:")
+                            st.code(ivr_code)
+                            st.text("Parsed Nodes:")
                             try:
-                                result = parse_mermaid(mermaid_text)
-                                st.json(result)
+                                json_str = ivr_code[16:-1].strip()
+                                st.json(json.loads(json_str))
                             except Exception as e:
                                 st.error(f"Parse Error: {str(e)}")
 
-                    # Create download button
-                    now = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    download_filename = f"ivr_flow_{now}.js"
-                    
-                    # Use base64 encoding for download
-                    b64 = base64.b64encode(ivr_code.encode()).decode()
-                    href = f'<a href="data:text/javascript;base64,{b64}" download="{download_filename}">Download IVR Code</a>'
-                    st.markdown(href, unsafe_allow_html=True)
+                    tmp_file = save_temp_file(output)
+                    with open(tmp_file, 'rb') as f:
+                        st.download_button(
+                            label="⬇️ Download IVR Configuration",
+                            data=f,
+                            file_name="ivr_flow.js",
+                            mime="text/plain"
+                        )
+                    os.unlink(tmp_file)
 
-                    show_code_diff(mermaid_text, ivr_code)
+                    show_code_diff(mermaid_text, output)
 
                 except Exception as e:
                     st.error(f"Conversion Error: {str(e)}")
@@ -256,10 +240,6 @@ def main():
                         st.text(traceback.format_exc())
     else:
         st.info("Mermaid code is not available. Please ensure you have converted your image or pasted your Mermaid code.")
-
-    # Add footer
-    st.markdown("---")
-    st.markdown("🔄 **Mermaid-to-IVR Converter** | Converts call flow diagrams to exact format IVR code")
 
 if __name__ == "__main__":
     main()
