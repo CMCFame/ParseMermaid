@@ -1,7 +1,8 @@
 """
-Local converter for Mermaid flowcharts to IVR configuration.
-This module parses Mermaid code and generates an IVR configuration
+Enhanced local converter for Mermaid flowcharts to IVR configuration.
+This module parses Mermaid code and generates a detailed IVR configuration
 in a Python dictionary format, and extracts diagram notes.
+It now detects menu nodes and generates a template for the playMenu structure.
 """
 
 import re
@@ -38,7 +39,6 @@ class MermaidIVRConverter:
             if line.startswith('flowchart'):
                 continue
 
-            # Capture notes for display in the UI
             if 'Notes:' in line or 'Note:' in line:
                 self.notes.append(line)
 
@@ -80,66 +80,52 @@ class MermaidIVRConverter:
     def parseConnection(self, line: str) -> None:
         pattern = r'^(\w+)\s*-->\s*(?:\|([^|]+)\|\s*)?(.+)$'
         match = re.match(pattern, line)
-        if not match:
-            return
+        if not match: return
         source, label, target = match.groups()
         source = source.strip()
         target = target.strip()
         label = label.strip() if label else ""
-        if re.search(r'[\[\(\{]', source):
-            source = self.parseInlineNode(source)
-        if re.search(r'[\[\(\{]', target):
-            target = self.parseInlineNode(target)
-        self.connections.append({
-            'source': source,
-            'target': target,
-            'label': label
-        })
+        if re.search(r'[\[\(\{]', source): source = self.parseInlineNode(source)
+        if re.search(r'[\[\(\{]', target): target = self.parseInlineNode(target)
+        self.connections.append({'source': source, 'target': target, 'label': label})
 
     def parseInlineNode(self, nodeStr: str) -> str:
         pattern = r'^(\w+)\s*([\[\(\{])(?:")?(.*?)(?:")?\s*([\]\)\}])$'
         match = re.match(pattern, nodeStr)
-        if not match:
-            return nodeStr
+        if not match: return nodeStr
         node_id, openBracket, content, closeBracket = match.groups()
         if node_id not in self.nodes:
             node_type = self.getNodeType(openBracket, closeBracket)
             label = re.sub(r'<br\s*/?>', '\n', content)
             label = label.replace('"', '').replace("'", "").strip()
-            node = {
-                'id': node_id,
-                'type': node_type,
-                'label': label,
-                'subgraph': None,
-                'isDecision': (node_type == 'decision'),
-                'connections': []
-            }
-            self.nodes[node_id] = node
+            self.nodes[node_id] = {'id': node_id, 'type': node_type, 'label': label, 'subgraph': None, 'isDecision': (node_type == 'decision'), 'connections': []}
         return node_id
 
     def parseSubgraph(self, line: str) -> Optional[Dict[str, Any]]:
         pattern = r'^subgraph\s+(\w+)\s*\[?([^\]]*)\]?$'
         match = re.match(pattern, line)
-        if not match:
-            return None
+        if not match: return None
         sub_id, title = match.groups()
         return {'id': sub_id, 'title': title.strip() if title else sub_id, 'direction': None, 'nodes': []}
 
     def parseStyle(self, line: str) -> None:
         pattern = r'^class\s+(\w+)\s+(\w+)'
         match = re.match(pattern, line)
-        if not match:
-            return
+        if not match: return
         node_id, className = match.groups()
-        if node_id in self.nodes:
-            self.nodes[node_id]['className'] = className
+        if node_id in self.nodes: self.nodes[node_id]['className'] = className
 
     def getNodeType(self, openBracket: str, closeBracket: str) -> str:
         bracket = openBracket[0]
         if bracket == '[': return 'process'
-        elif bracket == '(': return 'subroutine' if len(openBracket) == 2 else 'terminal'
+        elif bracket == '(': return 'subroutine'
         elif bracket == '{': return 'decision'
         else: return 'process'
+
+    def isMenuNode(self, node: Dict[str, Any]) -> bool:
+        """Heuristic to determine if a node represents a menu."""
+        text = node.get('label', '').lower()
+        return 'menu' in text or 'press' in text or 'option' in text
 
     def generateIVRFlow(self) -> List[Dict[str, Any]]:
         ivrFlow: List[Dict[str, Any]] = []
@@ -161,11 +147,12 @@ class MermaidIVRConverter:
         node['connections'] = outgoing
         ivrNode = self.createIVRNode(node)
         ivrFlow.append(ivrNode)
-        for conn in outgoing:
-            self.processNode(conn['target'], ivrFlow, processed)
+        for conn in outgoing: self.processNode(conn['target'], ivrFlow, processed)
 
     def createIVRNode(self, node: Dict[str, Any]) -> Dict[str, Any]:
         base = {'label': node['id'], 'log': node['label'].replace('\n', ' ')}
+        if self.isMenuNode(node) and node.get('isDecision'):
+            return self.createMenuNode(node, base)
         if node.get('isDecision'):
             return self.createDecisionNode(node, base)
         ivrNode = {**base, 'playPrompt': f"callflow:{node['id']}"}
@@ -173,28 +160,65 @@ class MermaidIVRConverter:
             ivrNode['goto'] = node['connections'][0]['target']
         return ivrNode
 
-    def createDecisionNode(self, node: Dict[str, Any], base: Dict[str, Any]) -> Dict[str, Any]:
-        branch = {}
-        validChoices = []
-        error_target = 'Problems'
-        timeout_target = 'Problems'
+    def createMenuNode(self, node: Dict[str, Any], base: Dict[str, Any]) -> Dict[str, Any]:
+        """Creates a more advanced playMenu structure."""
+        menu_items = []
+        branch_map = {}
+        choices = []
 
+        # Parse choices from node label and connections
         for conn in node.get('connections', []):
             label = conn.get('label', '').lower()
             target = conn.get('target')
-
-            digit_match = re.search(r'^\s*(\d+)', label)
-            
+            digit_match = re.search(r'^\s*(\d+)\b', label)
             if digit_match:
                 choice = digit_match.group(1)
-                if choice not in branch:
-                    branch[choice] = target
-                    validChoices.append(choice)
+                choices.append(choice)
+                branch_map[choice] = target
+        
+        # Create menu items from the node's text lines
+        for line in node['label'].split('\n'):
+            line_lower = line.lower()
+            if 'press' in line_lower:
+                digit_match = re.search(r'press\s+(\d+)', line_lower)
+                if digit_match:
+                    press = digit_match.group(1)
+                    menu_items.append({
+                        "press": int(press),
+                        "prompt": f"callflow:{{{{PROMPT_FOR_{press}}}}}", # Placeholder
+                        "log": line.strip()
+                    })
+
+        gosub_map = {**branch_map}
+        gosub_map.setdefault('error', 'Problems')
+        gosub_map.setdefault('none', 'Problems')
+
+        return {
+            **base,
+            'playMenu': menu_items,
+            'playPrompt': None,
+            'getDigits': {
+                'numDigits': 1,
+                'maxTries': 6,
+                'validChoices': "|".join(sorted(list(set(choices)))),
+                'retryLabel': node['id']
+            },
+            'gosub': gosub_map
+        }
+
+    def createDecisionNode(self, node: Dict[str, Any], base: Dict[str, Any]) -> Dict[str, Any]:
+        branch, validChoices, error_target, timeout_target = {}, [], 'Problems', 'Problems'
+        for conn in node.get('connections', []):
+            label, target = conn.get('label', '').lower(), conn.get('target')
+            digit_match = re.search(r'^\s*(\d+)', label)
+            if digit_match:
+                choice = digit_match.group(1)
+                if choice not in branch: branch[choice] = target; validChoices.append(choice)
             elif 'yes' in label:
                 if '1' not in branch: branch['1'] = target; validChoices.append('1')
             elif 'no' in label:
                 if '2' not in branch: branch['2'] = target; validChoices.append('2')
-            elif 'invalid' in label or 'retry' in label:
+            elif 'invalid' in label or 'retry' in label or 'error' in label:
                 error_target = target
             elif 'no input' in label or 'timeout' in label:
                 timeout_target = target
@@ -202,18 +226,10 @@ class MermaidIVRConverter:
         branch.setdefault('error', error_target)
         branch.setdefault('none', timeout_target)
         validChoices = sorted(list(set(validChoices)))
-
         return {
             **base,
             'playPrompt': f"callflow:{node['id']}",
-            'getDigits': {
-                'numDigits': 1,
-                'maxTries': self.config.get('defaultMaxTries', 3),
-                'maxTime': self.config.get('defaultMaxTime', 7),
-                'validChoices': '|'.join(validChoices),
-                'errorPrompt': self.config.get('defaultErrorPrompt', "callflow:1009"),
-                'timeoutPrompt': self.config.get('defaultErrorPrompt', "callflow:1009")
-            },
+            'getDigits': {'numDigits': 1, 'maxTries': self.config.get('defaultMaxTries', 3), 'validChoices': '|'.join(validChoices), 'errorPrompt': self.config.get('defaultErrorPrompt'), 'timeoutPrompt': self.config.get('defaultErrorPrompt')},
             'branch': branch
         }
 
@@ -225,12 +241,5 @@ class MermaidIVRConverter:
         return [node_id for node_id in self.nodes if node_id not in incoming]
 
 def convert_mermaid_to_ivr(mermaid_code: str) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """
-    Convert Mermaid code to IVR configuration.
-    Returns a tuple containing:
-    - ivr_flow: A list of python dictionaries representing the flow.
-    - notes: A list of strings containing extracted notes.
-    """
     converter = MermaidIVRConverter()
-    ivr_flow, notes = converter.convert(mermaid_code)
-    return ivr_flow, notes
+    return converter.convert(mermaid_code)
