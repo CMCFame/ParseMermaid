@@ -1,27 +1,29 @@
 """
-Drop-in Replacement for mermaid_ivr_converter.py
-This maintains the same interface while adding intelligent mapping capabilities
+Fixed Drop-in Replacement for mermaid_ivr_converter.py
+FIXED VERSION - Handles missing components gracefully for Streamlit Cloud
 """
 
 import os
 import json
 from typing import List, Dict, Any, Tuple, Optional
 
-# Try to import enhanced components, fallback to basic if not available
+# Try to import enhanced components with graceful fallback
 try:
-    from segment_analyzer import SegmentAnalyzer
     from enhanced_ivr_converter import EnhancedMermaidIVRConverter, validate_ivr_output
     ENHANCED_MODE_AVAILABLE = True
-except ImportError:
+    print("✅ Enhanced converter loaded successfully")
+except ImportError as e:
     ENHANCED_MODE_AVAILABLE = False
-    print("ℹ️ Enhanced mapping not available - using basic conversion")
+    print(f"ℹ️ Enhanced mapping not available: {str(e)}")
 
 # Import the original converter as fallback
 try:
     from mermaid_ivr_converter import MermaidIVRConverter as BasicMermaidIVRConverter
     BASIC_CONVERTER_AVAILABLE = True
-except ImportError:
+    print("✅ Basic converter available as fallback")
+except ImportError as e:
     BASIC_CONVERTER_AVAILABLE = False
+    print(f"⚠️ Basic converter not available: {str(e)}")
 
 class IntelligentMermaidIVRConverter:
     """
@@ -40,15 +42,18 @@ class IntelligentMermaidIVRConverter:
         if self.enhanced_available:
             try:
                 self.enhanced_converter = EnhancedMermaidIVRConverter(csv_file_path, config)
-                print("✅ Enhanced converter initialized")
+                print("✅ Enhanced converter initialized successfully")
             except Exception as e:
                 print(f"⚠️ Enhanced converter failed to initialize: {str(e)}")
                 self.enhanced_available = False
         
         # Fallback to basic converter if enhanced not available
         if not self.enhanced_available and BASIC_CONVERTER_AVAILABLE:
-            self.basic_converter = BasicMermaidIVRConverter(config)
-            print("ℹ️ Using basic converter as fallback")
+            try:
+                self.basic_converter = BasicMermaidIVRConverter(config)
+                print("ℹ️ Using basic converter as fallback")
+            except Exception as e:
+                print(f"⚠️ Basic converter initialization failed: {str(e)}")
     
     def convert(self, mermaid_code: str, company: str = None) -> Tuple[List[Dict[str, Any]], List[str]]:
         """
@@ -57,8 +62,10 @@ class IntelligentMermaidIVRConverter:
         """
         if self.enhanced_available:
             return self._convert_enhanced(mermaid_code, company)
-        else:
+        elif BASIC_CONVERTER_AVAILABLE:
             return self._convert_basic(mermaid_code)
+        else:
+            return self._convert_emergency(mermaid_code)
     
     def _convert_enhanced(self, mermaid_code: str, company: str = None) -> Tuple[List[Dict[str, Any]], List[str]]:
         """Convert using enhanced intelligent mapping"""
@@ -97,12 +104,15 @@ class IntelligentMermaidIVRConverter:
     def _convert_basic(self, mermaid_code: str) -> Tuple[List[Dict[str, Any]], List[str]]:
         """Convert using basic converter"""
         if BASIC_CONVERTER_AVAILABLE:
-            return self.basic_converter.convert(mermaid_code)
+            try:
+                return self.basic_converter.convert(mermaid_code)
+            except Exception as e:
+                print(f"❌ Basic conversion failed: {str(e)}")
+                return self._convert_emergency(mermaid_code)
         else:
-            # Ultra-basic fallback converter
-            return self._emergency_convert(mermaid_code)
+            return self._convert_emergency(mermaid_code)
     
-    def _emergency_convert(self, mermaid_code: str) -> Tuple[List[Dict[str, Any]], List[str]]:
+    def _convert_emergency(self, mermaid_code: str) -> Tuple[List[Dict[str, Any]], List[str]]:
         """Emergency fallback converter"""
         print("⚠️ Using emergency fallback converter")
         
@@ -130,8 +140,11 @@ class IntelligentMermaidIVRConverter:
                         "label": node_id,
                         "log": content,
                         "playPrompt": [f"callflow:{node_id}"],
-                        "goto": "hangup" if node_count == 1 else None
                     }
+                    
+                    # Add goto for simple flow
+                    if node_count > 1:
+                        node["goto"] = "hangup"
                     
                     nodes.append(node)
         
@@ -145,8 +158,9 @@ class IntelligentMermaidIVRConverter:
             })
         
         notes = [
-            "⚠️ Basic conversion used - audio file IDs may need manual adjustment",
-            "💡 Install enhanced components for intelligent mapping"
+            "⚠️ Emergency conversion used - limited functionality",
+            "💡 Install enhanced components for intelligent mapping",
+            "🔧 Audio file IDs may need manual adjustment"
         ]
         
         return nodes, notes
@@ -157,28 +171,32 @@ class IntelligentMermaidIVRConverter:
     
     def validate_output(self, ivr_flow: List[Dict]) -> Dict:
         """Validate the generated IVR output"""
-        if self.enhanced_available:
-            return validate_ivr_output(ivr_flow)
-        else:
-            # Basic validation
-            errors = []
-            warnings = []
-            
-            labels = set()
-            for i, node in enumerate(ivr_flow):
-                if 'label' not in node:
-                    errors.append(f"Node {i}: Missing label")
-                elif node['label'] in labels:
-                    errors.append(f"Node {i}: Duplicate label")
-                else:
-                    labels.add(node['label'])
-            
-            return {
-                'is_valid': len(errors) == 0,
-                'errors': errors,
-                'warnings': warnings,
-                'node_count': len(ivr_flow)
-            }
+        if self.enhanced_available and 'validate_ivr_output' in globals():
+            try:
+                return validate_ivr_output(ivr_flow)
+            except Exception as e:
+                print(f"⚠️ Enhanced validation failed: {str(e)}")
+        
+        # Basic validation fallback
+        errors = []
+        warnings = []
+        
+        labels = set()
+        for i, node in enumerate(ivr_flow):
+            if 'label' not in node:
+                errors.append(f"Node {i}: Missing label")
+            elif node['label'] in labels:
+                errors.append(f"Node {i}: Duplicate label '{node['label']}'")
+            else:
+                labels.add(node['label'])
+        
+        return {
+            'is_valid': len(errors) == 0,
+            'errors': errors,
+            'warnings': warnings,
+            'node_count': len(ivr_flow),
+            'validation_mode': 'basic'
+        }
 
 # Global instance for backward compatibility
 _global_converter = None
@@ -211,8 +229,18 @@ def convert_mermaid_to_ivr(mermaid_code: str, company: str = None,
     Returns:
         Tuple of (ivr_flow, notes) - same as original interface
     """
-    converter = get_converter(csv_file_path, config)
-    return converter.convert(mermaid_code, company)
+    try:
+        converter = get_converter(csv_file_path, config)
+        return converter.convert(mermaid_code, company)
+    except Exception as e:
+        print(f"❌ Conversion completely failed: {str(e)}")
+        # Return minimal fallback
+        return [{
+            "label": "Error", 
+            "log": "Conversion failed", 
+            "playPrompt": ["callflow:1351"],
+            "goto": "hangup"
+        }], [f"❌ Conversion error: {str(e)}"]
 
 def convert_mermaid_to_ivr_with_report(mermaid_code: str, company: str = None,
                                      csv_file_path: str = "cf_general_structure.csv",
@@ -223,11 +251,17 @@ def convert_mermaid_to_ivr_with_report(mermaid_code: str, company: str = None,
     Returns:
         Tuple of (ivr_flow, notes, conversion_report)
     """
-    converter = get_converter(csv_file_path, config)
-    ivr_flow, notes = converter.convert(mermaid_code, company)
-    report = converter.get_conversion_report()
-    
-    return ivr_flow, notes, report
+    try:
+        converter = get_converter(csv_file_path, config)
+        ivr_flow, notes = converter.convert(mermaid_code, company)
+        report = converter.get_conversion_report()
+        
+        return ivr_flow, notes, report
+    except Exception as e:
+        print(f"❌ Enhanced conversion failed: {str(e)}")
+        # Return basic conversion without report
+        ivr_flow, notes = convert_mermaid_to_ivr(mermaid_code, company, csv_file_path, config)
+        return ivr_flow, notes, None
 
 def validate_ivr_configuration(ivr_flow: List[Dict], 
                              csv_file_path: str = "cf_general_structure.csv") -> Dict:
@@ -241,8 +275,17 @@ def validate_ivr_configuration(ivr_flow: List[Dict],
     Returns:
         Validation result dictionary
     """
-    converter = get_converter(csv_file_path)
-    return converter.validate_output(ivr_flow)
+    try:
+        converter = get_converter(csv_file_path)
+        return converter.validate_output(ivr_flow)
+    except Exception as e:
+        print(f"❌ Validation failed: {str(e)}")
+        return {
+            'is_valid': False,
+            'errors': [f"Validation error: {str(e)}"],
+            'warnings': [],
+            'node_count': len(ivr_flow)
+        }
 
 # Utility functions for integration
 def check_system_status() -> Dict[str, Any]:
@@ -251,8 +294,13 @@ def check_system_status() -> Dict[str, Any]:
         'enhanced_mapping_available': ENHANCED_MODE_AVAILABLE,
         'basic_converter_available': BASIC_CONVERTER_AVAILABLE,
         'csv_database_found': os.path.exists("cf_general_structure.csv"),
+        'system_ready': False,
         'recommended_setup': []
     }
+    
+    # Determine system readiness
+    if ENHANCED_MODE_AVAILABLE or BASIC_CONVERTER_AVAILABLE:
+        status['system_ready'] = True
     
     # Generate recommendations
     if not status['enhanced_mapping_available']:
@@ -303,8 +351,8 @@ def setup_intelligent_conversion(csv_file_path: str) -> bool:
 
 # Example usage and testing
 if __name__ == "__main__":
-    print("🧪 Testing Intelligent Mermaid IVR Converter")
-    print("="*50)
+    print("🧪 Testing Fixed Intelligent Mermaid IVR Converter")
+    print("="*60)
     
     # Check system status
     status = check_system_status()
@@ -350,7 +398,7 @@ if __name__ == "__main__":
         print(f"❌ Test failed: {str(e)}")
     
     print(f"\n🎯 Integration Notes:")
-    print(f"   • Replace 'from mermaid_ivr_converter import convert_mermaid_to_ivr'")
-    print(f"   • With 'from integration_replacement import convert_mermaid_to_ivr'") 
-    print(f"   • Add optional company parameter for better mapping")
-    print(f"   • Enhanced features automatically activate when components available")
+    print(f"   • This version handles missing components gracefully")
+    print(f"   • Works with or without enhanced mapping")
+    print(f"   • Provides multiple fallback levels")
+    print(f"   • Ready for Streamlit Cloud deployment")
