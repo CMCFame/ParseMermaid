@@ -1,8 +1,9 @@
 streamlit
 streamlit-mermaid
-pandas
 numpy
 openai
 pillow
 pdf2image
 python-dotenv
+pandas>=2.0.0
+requests>=2.31.0
