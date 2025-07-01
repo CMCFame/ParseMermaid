@@ -299,7 +299,7 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuration")
         if st.checkbox("Show Debug Info"):
-        debug_secrets()
+            debug_secrets()
         
         # Company selection
         selected_company = st.selectbox(
