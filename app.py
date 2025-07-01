@@ -11,6 +11,7 @@ import os
 import pandas as pd
 from PIL import Image
 import traceback
+from production_integration import validate_ivr_configuration
 
 # NEW: Import cloud CSV manager
 from cloud_csv_manager import get_csv_database_path, show_database_status
