@@ -43,6 +43,8 @@ if 'ivr_system' not in st.session_state:
     st.session_state.ivr_system = None
 if 'quality_report' not in st.session_state:
     st.session_state.quality_report = None
+if 'db_source' not in st.session_state:
+    st.session_state.db_source = None
 
 # Constants and examples
 DEFAULT_FLOWS = {
@@ -281,48 +283,197 @@ def main():
         # Audio database section
         st.subheader("📁 Audio Database")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔄 Load Database", help="Load audio database from Google Drive"):
-                with st.spinner("Loading audio database from Google Drive..."):
-                    try:
-                        # Load audio database
-                        audio_db = load_audio_database("csv_url", show_progress=False)
-                        
-                        if audio_db is not None:
-                            # Create enhanced IVR system
-                            ivr_system = DataDrivenAudioMapper(audio_db)
-                            
-                            # Store in session state
-                            st.session_state.audio_database = audio_db
-                            st.session_state.ivr_system = ivr_system
-                            
-                            # Show success metrics
-                            stats = audio_db.get_stats()
-                            st.success(f"✅ Loaded {stats['total_files']} audio files")
-                            
-                            # Display stats
-                            st.metric("Companies", stats['companies'])
-                            st.metric("Categories", stats['folders'])
-                            
-                        else:
-                            st.error("Failed to load audio database")
-                            
-                    except Exception as e:
-                        st.error(f"Database loading error: {str(e)}")
-                        st.info("💡 Check your Google Drive URL in Streamlit secrets")
+        # Database loading method selection
+        db_method = st.radio(
+            "Loading Method",
+            ["Upload CSV File", "Google Drive (if configured)"],
+            help="Choose how to load your audio database"
+        )
         
-        with col2:
-            if st.button("🔄 Refresh", help="Refresh database from Google Drive"):
-                if st.session_state.audio_database:
-                    st.session_state.audio_database.refresh_data()
-                    st.success("✅ Database refreshed")
-                else:
-                    st.warning("Load database first")
+        if db_method == "Upload CSV File":
+            # File upload option
+            uploaded_csv = st.file_uploader(
+                "Upload Audio Database CSV",
+                type=['csv'],
+                help="Upload your cf_general_structure.csv file",
+                key="csv_uploader"
+            )
+            
+            if uploaded_csv is not None:
+                if st.button("📂 Load Uploaded Database", help="Load audio database from uploaded file"):
+                    with st.spinner("Loading audio database from uploaded file..."):
+                        try:
+                            # Read uploaded CSV
+                            import pandas as pd
+                            df = pd.read_csv(uploaded_csv)
+                            
+                            # Validate required columns
+                            required_columns = ['Company', 'Folder', 'File Name', 'Transcript']
+                            missing_columns = [col for col in required_columns if col not in df.columns]
+                            
+                            if missing_columns:
+                                st.error(f"CSV missing required columns: {missing_columns}")
+                                st.info("Required columns: Company, Folder, File Name, Transcript")
+                            else:
+                                # Create temporary database class for uploaded file
+                                class UploadedAudioDatabase:
+                                    def __init__(self, dataframe):
+                                        self._df = dataframe
+                                        self._df['Transcript'] = self._df['Transcript'].astype(str).str.strip()
+                                        self._df['Company'] = self._df['Company'].astype(str).str.strip().str.lower()
+                                        self._df['Folder'] = self._df['Folder'].astype(str).str.strip()
+                                        self._df['File Name'] = self._df['File Name'].astype(str).str.strip()
+                                        self._df = self._df.dropna(subset=['Transcript'])
+                                        self._df = self._df[self._df['Transcript'] != '']
+                                        self._build_indexes()
+                                    
+                                    def _build_indexes(self):
+                                        self.phrase_index = {}
+                                        self.company_index = {}
+                                        self.folder_index = {}
+                                        
+                                        for _, row in self._df.iterrows():
+                                            transcript = row['Transcript'].lower().strip()
+                                            company = row['Company'].lower().strip()
+                                            folder = row['Folder'].strip()
+                                            file_name = row['File Name']
+                                            audio_id = file_name.replace('.ulaw', '') if file_name.endswith('.ulaw') else file_name
+                                            
+                                            # Build phrase index
+                                            if transcript not in self.phrase_index:
+                                                self.phrase_index[transcript] = []
+                                            self.phrase_index[transcript].append({
+                                                'audio_id': audio_id, 'company': company, 'folder': folder,
+                                                'full_path': f"{folder}:{audio_id}"
+                                            })
+                                            
+                                            # Build company index
+                                            if company not in self.company_index:
+                                                self.company_index[company] = {}
+                                            if transcript not in self.company_index[company]:
+                                                self.company_index[company][transcript] = []
+                                            self.company_index[company][transcript].append({
+                                                'audio_id': audio_id, 'folder': folder, 'full_path': f"{folder}:{audio_id}"
+                                            })
+                                            
+                                            # Build folder index
+                                            if folder not in self.folder_index:
+                                                self.folder_index[folder] = {}
+                                            if transcript not in self.folder_index[folder]:
+                                                self.folder_index[folder][transcript] = []
+                                            self.folder_index[folder][transcript].append({
+                                                'audio_id': audio_id, 'company': company, 'full_path': f"{folder}:{audio_id}"
+                                            })
+                                    
+                                    def get_dataframe(self):
+                                        return self._df.copy()
+                                    
+                                    def find_exact_match(self, text, company=None, folder=None):
+                                        text_lower = text.lower().strip()
+                                        company_lower = company.lower().strip() if company else None
+                                        
+                                        if company_lower and company_lower in self.company_index:
+                                            if text_lower in self.company_index[company_lower]:
+                                                return self.company_index[company_lower][text_lower]
+                                        
+                                        if folder and folder in self.folder_index:
+                                            if text_lower in self.folder_index[folder]:
+                                                return self.folder_index[folder][text_lower]
+                                        
+                                        return self.phrase_index.get(text_lower, [])
+                                    
+                                    def get_companies(self):
+                                        return sorted(self._df['Company'].unique())
+                                    
+                                    def get_folders(self):
+                                        return sorted(self._df['Folder'].unique())
+                                    
+                                    def get_stats(self):
+                                        return {
+                                            'total_files': len(self._df),
+                                            'companies': len(self._df['Company'].unique()),
+                                            'folders': len(self._df['Folder'].unique()),
+                                            'unique_transcripts': len(self._df['Transcript'].unique())
+                                        }
+                                
+                                # Create database and IVR system
+                                audio_db = UploadedAudioDatabase(df)
+                                ivr_system = DataDrivenAudioMapper(audio_db)
+                                
+                                # Store in session state
+                                st.session_state.audio_database = audio_db
+                                st.session_state.ivr_system = ivr_system
+                                st.session_state.db_source = "uploaded"
+                                
+                                # Show success metrics
+                                stats = audio_db.get_stats()
+                                st.success(f"✅ Loaded {stats['total_files']} audio files from uploaded CSV")
+                                
+                                # Display stats
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.metric("Companies", stats['companies'])
+                                with col2:
+                                    st.metric("Categories", stats['folders'])
+                                
+                        except Exception as e:
+                            st.error(f"Failed to load uploaded CSV: {str(e)}")
+                            st.info("💡 Make sure your CSV has columns: Company, Folder, File Name, Transcript")
+            else:
+                st.info("👆 Upload your audio database CSV file above")
+        
+        else:
+            # Google Drive option
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔄 Load from Drive", help="Load audio database from Google Drive"):
+                    with st.spinner("Loading audio database from Google Drive..."):
+                        try:
+                            # Load audio database
+                            audio_db = load_audio_database("csv_url", show_progress=False)
+                            
+                            if audio_db is not None:
+                                # Create enhanced IVR system
+                                ivr_system = DataDrivenAudioMapper(audio_db)
+                                
+                                # Store in session state
+                                st.session_state.audio_database = audio_db
+                                st.session_state.ivr_system = ivr_system
+                                st.session_state.db_source = "google_drive"
+                                
+                                # Show success metrics
+                                stats = audio_db.get_stats()
+                                st.success(f"✅ Loaded {stats['total_files']} audio files from Google Drive")
+                                
+                                # Display stats
+                                st.metric("Companies", stats['companies'])
+                                st.metric("Categories", stats['folders'])
+                                
+                            else:
+                                st.error("Failed to load audio database from Google Drive")
+                                st.info("💡 Try uploading the CSV file instead")
+                                
+                        except Exception as e:
+                            st.error(f"Google Drive loading error: {str(e)}")
+                            st.info("💡 Switch to 'Upload CSV File' method above")
+            
+            with col2:
+                if st.button("🔄 Refresh Drive", help="Refresh database from Google Drive"):
+                    if st.session_state.audio_database and st.session_state.get('db_source') == 'google_drive':
+                        st.session_state.audio_database.refresh_data()
+                        st.success("✅ Database refreshed")
+                    else:
+                        st.warning("Google Drive database not loaded")
         
         # Database status
         if st.session_state.audio_database:
-            st.success("📊 Database Status: Connected")
+            db_source = st.session_state.get('db_source', 'unknown')
+            if db_source == 'uploaded':
+                st.success("📊 Database Status: Connected (Uploaded File)")
+            elif db_source == 'google_drive':
+                st.success("📊 Database Status: Connected (Google Drive)")
+            else:
+                st.success("📊 Database Status: Connected")
             
             # Show quick stats
             try:
@@ -332,10 +483,12 @@ def main():
                     st.write(f"**Companies:** {stats['companies']}")
                     st.write(f"**Categories:** {stats['folders']}")
                     st.write(f"**Unique Transcripts:** {stats['unique_transcripts']}")
+                    st.write(f"**Source:** {db_source.replace('_', ' ').title()}")
             except:
                 pass
         else:
             st.warning("📊 Database Status: Not Connected")
+            st.info("👆 Load your database using one of the methods above")
         
         st.divider()
         
@@ -548,7 +701,9 @@ def main():
         with col1:
             st.write("**Audio Database:**")
             if st.session_state.audio_database:
+                db_source = st.session_state.get('db_source', 'unknown')
                 st.success("✅ Connected")
+                st.write(f"Source: {db_source.replace('_', ' ').title()}")
                 try:
                     stats = st.session_state.audio_database.get_stats()
                     st.write(f"Files: {stats['total_files']}")
@@ -557,6 +712,7 @@ def main():
                     st.write("Stats unavailable")
             else:
                 st.error("❌ Not Connected")
+                st.write("Use sidebar to load database")
         
         with col2:
             st.write("**IVR System:**")
