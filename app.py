@@ -287,7 +287,7 @@ def main():
                 with st.spinner("Loading audio database from Google Drive..."):
                     try:
                         # Load audio database
-                        audio_db = load_audio_database("csv_url", show_progress=False)
+                        audio_db = load_audio_database("audio_database_url", show_progress=False)
                         
                         if audio_db is not None:
                             # Create enhanced IVR system
