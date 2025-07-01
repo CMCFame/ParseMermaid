@@ -21,7 +21,7 @@ from openai_converter import process_flow_diagram
 
 # NEW: Import enhanced converter with cloud CSV support
 try:
-    from integration_replacement import convert_mermaid_to_ivr_with_report, validate_ivr_configuration
+    from production_integration import convert_mermaid_to_ivr_with_report
     ENHANCED_MODE_AVAILABLE = True
 except ImportError:
     # Fallback to your existing converter
