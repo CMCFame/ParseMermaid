@@ -12,7 +12,6 @@ from PIL import Image
 import traceback
 import logging
 from typing import Dict, List, Any, Optional
-os.environ['CSV_URL'] = "https://drive.google.com/uc?id=1ZEllzIs-WdecGadLl1RO_v-Sipt6R5-2&export=download"
 
 # Import enhanced modules
 from parse_mermaid import parse_mermaid, MermaidParser
