@@ -70,35 +70,6 @@ D --> E'''
 
 SUPPORTED_COMPANIES = ['aep', 'dpl', 'weceg', 'integrys', 'global']
 
-def debug_secrets():
-    """Debug function to check secrets status"""
-    st.subheader("🐛 Secrets Debug")
-    
-    try:
-        st.write("**All available secrets:**")
-        if hasattr(st, 'secrets'):
-            st.write(f"Secrets object exists: {st.secrets}")
-            st.write(f"Available secret keys: {list(st.secrets.keys())}")
-            
-            if 'csv_url' in st.secrets:
-                url = st.secrets['csv_url']
-                st.success(f"✅ csv_url found: {url[:50]}...")
-                
-                # Test if URL is accessible
-                import requests
-                try:
-                    response = requests.head(url, timeout=10)
-                    st.write(f"URL status: {response.status_code}")
-                except Exception as e:
-                    st.error(f"URL test failed: {str(e)}")
-            else:
-                st.error("❌ csv_url not found in secrets")
-        else:
-            st.error("❌ st.secrets object doesn't exist")
-            
-    except Exception as e:
-        st.error(f"Debug error: {str(e)}")
-
 def save_temp_file(content: str, suffix: str = '.js') -> str:
     """Save content to a temporary file and return the path"""
     with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False, encoding='utf-8') as f:
@@ -298,8 +269,6 @@ def main():
     # Sidebar configuration
     with st.sidebar:
         st.header("⚙️ Configuration")
-        if st.checkbox("Show Debug Info"):
-            debug_secrets()
         
         # Company selection
         selected_company = st.selectbox(
