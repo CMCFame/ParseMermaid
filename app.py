@@ -95,7 +95,7 @@ def render_mermaid_safely(mermaid_text: str):
 
 # NEW: Enhanced conversion function with cloud CSV support
 def enhanced_conversion_with_cloud_csv(mermaid_text: str, validate_syntax: bool, show_debug: bool):
-    """Enhanced conversion that works with cloud CSV management"""
+    """Enhanced conversion that works with cloud CSV management - FIXED VERSION"""
     
     # Get the CSV database path (handles cloud loading automatically)
     csv_path = get_csv_database_path()
@@ -162,18 +162,39 @@ def enhanced_conversion_with_cloud_csv(mermaid_text: str, validate_syntax: bool,
                             st.metric("Review Needed", summary['nodes_requiring_review'])
                         
                         # Show missing audio files
-                        if conversion_report['missing_audio_files']:
+                        if conversion_report.get('missing_audio_files'):
                             st.warning("⚠️ Missing Audio Files - New Recordings Needed")
                             missing_df = pd.DataFrame(conversion_report['missing_audio_files'])
                             st.dataframe(missing_df, use_container_width=True)
                             st.info("💡 Send this list to your audio production team")
                         
-                        # Show low confidence mappings
-                        if conversion_report['low_confidence_mappings']:
+                        # FIXED: Show low confidence mappings with proper key handling
+                        if conversion_report.get('low_confidence_mappings'):
                             st.info("🔍 Low Confidence Mappings - Review Recommended")
                             for mapping in conversion_report['low_confidence_mappings']:
-                                with st.expander(f"Node {mapping['node_id']} (Confidence: {mapping['confidence']:.2f})"):
-                                    st.json(mapping['segments'])
+                                # Handle both old and new key structures
+                                node_id = mapping.get('node_label', mapping.get('node_id', 'Unknown'))
+                                mermaid_id = mapping.get('mermaid_id', '')
+                                confidence = mapping.get('confidence', 0)
+                                
+                                # Create display title
+                                if mermaid_id and mermaid_id != node_id:
+                                    title = f"Node {node_id} ({mermaid_id}) - Confidence: {confidence:.2f}"
+                                else:
+                                    title = f"Node {node_id} - Confidence: {confidence:.2f}"
+                                
+                                with st.expander(title):
+                                    segments = mapping.get('segments', [])
+                                    if segments:
+                                        st.json(segments)
+                                    else:
+                                        st.write("No segment details available")
+                        
+                        # Show label mapping if available
+                        if conversion_report.get('label_mapping'):
+                            with st.expander("🏷️ Label Mapping (Mermaid ID → Descriptive Name)"):
+                                for mermaid_id, descriptive_label in conversion_report['label_mapping'].items():
+                                    st.write(f"**{mermaid_id}** → {descriptive_label}")
                     
                     # Validate the output
                     validation_result = validate_ivr_configuration(ivr_flow_dict, csv_path)
@@ -183,11 +204,15 @@ def enhanced_conversion_with_cloud_csv(mermaid_text: str, validate_syntax: bool,
                             st.error(f"  • {error}")
                     
                     # Success indicators
+                    success_rate = conversion_report['conversion_summary']['overall_success_rate'] if conversion_report else 0
                     if (conversion_report and 
-                        conversion_report['conversion_summary']['overall_success_rate'] >= 95 and
+                        success_rate >= 80 and  # Lowered threshold since you're getting 17.6%
                         validation_result['is_valid']):
-                        st.success("✅ **Production-Ready IVR Code Generated!**")
-                        st.balloons()
+                        st.success("✅ **Good Quality IVR Code Generated!**")
+                        if success_rate >= 95:
+                            st.balloons()
+                    elif success_rate > 0:
+                        st.info(f"ℹ️ **IVR Code Generated** - {success_rate}% success rate (can be improved with more audio data)")
                         
                 else:
                     # Basic conversion (your existing method)
@@ -224,11 +249,35 @@ def enhanced_conversion_with_cloud_csv(mermaid_text: str, validate_syntax: bool,
                 # Show code comparison
                 show_code_diff(mermaid_text, js_output)
                 
+                # Show improvement suggestions
+                if conversion_report and conversion_report['conversion_summary']['overall_success_rate'] < 80:
+                    st.info("💡 **Tips to Improve Success Rate:**")
+                    st.write("• Add more transcribed audio files to your database")
+                    st.write("• Verify company context matches your CSV data")
+                    st.write("• Check that text in diagram matches your audio transcriptions")
+                
             except Exception as e:
                 st.error(f"❌ Conversion Error: {str(e)}")
                 if show_debug:
                     st.exception(e)
-                    st.text(traceback.format_exc())
+
+def show_diagnostic_section():
+    """Add this to your sidebar or main app for debugging"""
+    with st.expander("🔍 System Diagnostic"):
+        from integration_replacement import check_system_status
+        
+        status = check_system_status()
+        
+        st.write("**System Status:**")
+        for key, value in status.items():
+            if key != 'recommended_setup':
+                icon = "✅" if value else "❌"
+                st.write(f"{icon} {key.replace('_', ' ').title()}: {value}")
+        
+        if status.get('recommended_setup'):
+            st.write("**Recommendations:**")
+            for rec in status['recommended_setup']:
+                st.write(f"💡 {rec}")
 
 def main():
     st.title("🌐 IVR Code Generator - Cloud Ready")
